@@ -47,7 +47,6 @@
         <a href="#pillars">About</a>
         <a href="#why">Why</a>
         <a href="#architecture">Architecture</a>
-        <a href="#devlog">Dev log</a>
         <a href="https://github.com/janpauldahlke/eris">GitHub</a>
       </nav>
     </div>
@@ -397,7 +396,7 @@
           <p>
             I am a <strong>solo developer</strong>. I know projects like Odysseus and Hermes exist in the same space.
             That is fine. Eris is still the system I run every day, and I would rather share a real codebase
-            under Apache 2.0 than sit on it until it is “perfect.” M0 is public source: read it, build it, judge it.
+            under Apache 2.0 than sit on it until it is “perfect.” This is public source: read it, build it, judge it.
           </p>
           <p class="why-box__close">
             If you are also building a local harness: steal the patterns, file issues, or fork. That is the point.
@@ -473,7 +472,7 @@ cargo build --release
           <h3>Known limitations</h3>
           <ul>
             <li>Alpha; single-user, single-process</li>
-            <li>Installation is manual; installers planned (M1)</li>
+            <li>Installation is manual; installers planned</li>
             <li>Long-context JSON discipline: improving; benchmark table coming</li>
             <li>Dogfooded on Linux + NVIDIA; Apple Silicon also supported</li>
           </ul>
@@ -481,41 +480,7 @@ cargo build --release
       </div>
     </section>
 
-    <!-- 9. Dev log -->
-    <section class="section" id="devlog" aria-labelledby="devlog-title">
-      <div class="wrap">
-        <span class="section__label">[devlog]</span>
-        <h2 id="devlog-title">Dev log</h2>
-        <p class="section__lede">Engineering diary: the marketing is the work log.</p>
-        <article class="devlog-entry">
-          <header>
-            <span class="tag">[devlog]</span>
-            <span class="tag">2026-07-17</span>
-            <h3>Going public (M0)</h3>
-          </header>
-          <p>
-            We're open-sourcing Eris this weekend under Apache 2.0. The codebase is real:
-            ~64k lines of Rust, dogfooded daily, not a demo. M0 is "public source":
-            you can read, build, and judge. M1 (installable in ~15 minutes) comes next.
-          </p>
-          <p>
-            What's in: GBNF-enforced tool protocol, tiered vault memory, TUI + web + optional
-            Discord on one orchestrator.
-          </p>
-          <p>
-            What's out for now: installers, prebuilt binaries, published benchmark tables.
-            The truncation-under-long-context issue is documented honestly; fix lands before
-            the visibility push to r/LocalLLaMA.
-          </p>
-          <p>
-            <a href="#why">More on why below</a>.
-          </p>
-          <p class="signoff">- Jan</p>
-        </article>
-      </div>
-    </section>
-
-    <!-- 10. Links -->
+    <!-- Links -->
     <section class="section" id="links" aria-labelledby="links-title">
       <div class="wrap">
         <span class="section__label">[links]</span>
@@ -557,8 +522,10 @@ cargo build --release
         </ul>
 
         <p class="name-note">
-          <strong>Eris</strong> is named for the Greek goddess of strife and the golden apple of discord,
-          not an acronym. A local agent that productively disturbs your vault: read, write, remember, remind.
+          <strong>Eris</strong> is named for the Greek goddess of strife and the golden apple of discord.
+          She forced a choice; so does going local.
+          Hosted chat is convenient until your drafts and doubts live in someone else's log.
+          Eris stays on your machine and productively disturbs <em>your</em> vault: read, write, remember, remind.
         </p>
       </div>
     </section>
@@ -574,11 +541,6 @@ cargo build --release
       <p>
         Built with static HTML. Deploy target: Cloudflare Pages.
         Source lives in this site repo once public.
-      </p>
-      <p>
-        Web fetch powered by
-        <a href="https://github.com/alejandroqh/browser39">browser39</a>.
-        Thanks, Alejandro.
       </p>
     </div>
   </footer>
