@@ -13,11 +13,15 @@ python3 -m http.server 8080
 
 ## Deploy: Cloudflare Pages
 
-1. Cloudflare Dashboard → Pages → Connect Git → this repo
-2. Build command: *(empty)* · Output directory: `/`
-3. Custom domain: `eris-system.dev` (+ `www` → apex)
-4. SSL: Full (strict)
+Use **Pages** (Connect Git), not Workers / `wrangler deploy`.
+
+1. Workers & Pages → Create → Pages → Connect Git → this repo
+2. Build command: *(empty)* · Build output directory: `/` or `.`
+3. Deploy command: *(empty / none)* — do not set `npx wrangler deploy`
+4. Custom domain: `eris-system.dev` (+ `www` → apex)
 5. `_headers` in the repo root is applied automatically on Pages
+
+`/*` in `_headers` means “all paths”, not a comment.
 
 ## Deploy: GitHub Pages (interim)
 
