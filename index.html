@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Eris: local-first agent for your Markdown vault</title>
-  <meta name="description" content="Eris is a local-first agent in Rust: Obsidian-compatible vault as memory, GBNF-enforced tool calls on llama.cpp. Nothing leaves your machine unless you say so." />
+  <meta name="description"
+    content="Eris is a local-first agent in Rust: Obsidian-compatible vault as memory, GBNF-enforced tool calls on llama.cpp. Nothing leaves your machine unless you say so." />
   <meta name="keywords" content="eris-agent, local LLM, llama.cpp, GBNF, Obsidian, Rust, sovereign AI" />
   <link rel="canonical" href="https://eris-system.dev/" />
 
@@ -33,6 +35,7 @@
   }
   </script>
 </head>
+
 <body>
   <header class="site-header">
     <div class="site-header__inner">
@@ -72,18 +75,15 @@
           </div>
           <div class="cta-row">
             <a class="btn-primary" href="https://github.com/janpauldahlke/eris">View on GitHub</a>
-            <a class="btn-secondary" href="https://github.com/janpauldahlke/eris/tree/main/docs/updated_architecture">Architecture docs</a>
+            <a class="btn-secondary"
+              href="https://github.com/janpauldahlke/eris/tree/main/docs/updated_architecture">Architecture docs</a>
           </div>
         </div>
       </div>
       <div class="wrap wrap--wide" style="margin-top: 2rem;">
         <figure class="screenshot-frame hero__media">
-          <img
-            src="assets/screenshots/web-console-light.png"
-            width="1024"
-            height="576"
-            alt="Eris web console: chat, thought panel, telemetry, and status metrics."
-          />
+          <img src="assets/screenshots/web-console-light_1.png" width="1024" height="576"
+            alt="Eris web console: chat, thought panel, telemetry, and status metrics." />
           <figcaption>
             Web console: chat, THOUGHT, TELEMETRY, and status bar. Same session as the TUI.
           </figcaption>
@@ -181,7 +181,8 @@
               the <code>Tool</code> trait, register with the gatekeeper, add a descriptor TOML,
               allowlist by state.
               See
-              <a href="https://github.com/janpauldahlke/eris/blob/main/docs/HOW_TO/ADDING_A_TOOL.md">ADDING_A_TOOL.md</a>.
+              <a
+                href="https://github.com/janpauldahlke/eris/blob/main/docs/HOW_TO/ADDING_A_TOOL.md">ADDING_A_TOOL.md</a>.
             </p>
             <p class="tool-roster">
               <span class="tool-roster__label">examples</span>
@@ -230,12 +231,8 @@
           </article>
         </div>
         <figure class="screenshot-frame demo-block">
-          <img
-            src="assets/demo.gif"
-            width="960"
-            height="540"
-            alt="Eris web console session: chat with thought and telemetry panels updating live."
-          />
+          <img src="assets/demo.gif" width="960" height="540"
+            alt="Eris web console session: chat with thought and telemetry panels updating live." />
           <figcaption>Web console session recording: thought + telemetry on a live turn.</figcaption>
         </figure>
       </div>
@@ -247,8 +244,9 @@
         <span class="section__label">[architecture]</span>
         <h2 id="arch-title">How it works</h2>
         <p class="section__lede">Tools and memory are first-class, not buried under “orchestrator.”</p>
-        <div class="arch-diagram" role="img" aria-label="Architecture diagram: surfaces to orchestrator to llama.cpp, with gatekeeper tools and memory">
-<pre>
+        <div class="arch-diagram" role="img"
+          aria-label="Architecture diagram: surfaces to orchestrator to llama.cpp, with gatekeeper tools and memory">
+          <pre>
 ┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
 │  TUI / Web  │────▶│   Orchestrator   │────▶│ llama.cpp   │
 │  / Discord  │◀────│  + Recover loop  │◀────│  (GBNF)     │
@@ -284,8 +282,10 @@
           <article class="panel">
             <h3>Is</h3>
             <ul>
-              <li>A <strong>Rust</strong> reference architecture for sovereign local LLM pipelines: actor model, zero <code>unsafe</code>, zero panics in production paths, single binary</li>
-              <li>The most reliable harness for the GGUF you can run locally: grammar + gatekeeper + recovery, not “smarter model”</li>
+              <li>A <strong>Rust</strong> reference architecture for sovereign local LLM pipelines: actor model, zero
+                <code>unsafe</code>, zero panics in production paths, single binary</li>
+              <li>The most reliable harness for the GGUF you can run locally: grammar + gatekeeper + recovery, not
+                “smarter model”</li>
               <li>Smarter <em>about your data</em> than anything hosted: lives where your notes live</li>
               <li>Extensible: add tools without forking the orchestrator</li>
             </ul>
@@ -334,12 +334,8 @@
           </table>
         </div>
         <figure class="screenshot-frame" style="margin-top: 1.25rem;">
-          <img
-            src="assets/gpu_metrics.png"
-            width="937"
-            height="540"
-            alt="nvidia-smi showing llama-server using about 13 GB VRAM on an RTX 4080."
-          />
+          <img src="assets/gpu_metrics.png" width="937" height="540"
+            alt="nvidia-smi showing llama-server using about 13 GB VRAM on an RTX 4080." />
           <figcaption>
             Suggested stack on ~16&nbsp;GB VRAM: <strong>Gemma&nbsp;4 12B</strong> via
             <code>llama-server</code> (shown: RTX&nbsp;4080, ~13&nbsp;GB loaded).
@@ -365,7 +361,8 @@
             </li>
             <li>
               <span class="senses__tag">[stack]</span>
-              <span>Gemma&nbsp;4 12B on 16&nbsp;GB VRAM is the sweet spot we run: chat + ~32k context + vision headroom.</span>
+              <span>Gemma&nbsp;4 12B on 16&nbsp;GB VRAM is the sweet spot we run: chat + ~32k context + vision
+                headroom.</span>
             </li>
           </ul>
           <p class="senses__note">
@@ -424,12 +421,14 @@
             <tbody>
               <tr>
                 <td>Always on</td>
-                <td>Chat (TUI + web), vault read/write/list, Gatekeeper + GBNF (llama.cpp), tiered memory (ephemeral + vault + Qdrant), agenda / alarms</td>
+                <td>Chat (TUI + web), vault read/write/list, Gatekeeper + GBNF (llama.cpp), tiered memory (ephemeral +
+                  vault + Qdrant), agenda / alarms</td>
                 <td>First <code>eris chat</code> after wizard + Qdrant</td>
               </tr>
               <tr>
                 <td>Opt-in</td>
-                <td>Web fetch (<a href="https://github.com/alejandroqh/browser39">browser39</a>, allowlist + consent), weather, wiki, Discord sidecar, Google mail/calendar, Moltbook</td>
+                <td>Web fetch (<a href="https://github.com/alejandroqh/browser39">browser39</a>, allowlist + consent),
+                  weather, wiki, Discord sidecar, Google mail/calendar, Moltbook</td>
                 <td>Config flag / credentials</td>
               </tr>
               <tr>
@@ -445,7 +444,8 @@
           they are just not required to chat with your vault.
         </p>
         <p class="feature-line" style="margin-top: 1.25rem;">
-          Backend: llama.cpp is the canonical production backend. Ollama is supported as easier install with weaker JSON discipline.
+          Backend: llama.cpp is the canonical production backend. Ollama is supported as easier install with weaker JSON
+          discipline.
         </p>
       </div>
     </section>
@@ -545,4 +545,5 @@ cargo build --release
     </div>
   </footer>
 </body>
+
 </html>
