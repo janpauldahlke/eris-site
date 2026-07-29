@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>How I use GBNF grammars to make small local models stop hallucinating JSON — Eris dev blog</title>
+  <meta name="description"
+    content="Why your 8B model keeps breaking your agent's tool protocol, and what you can do about it at the token level with GBNF grammars in llama.cpp." />
+  <meta name="keywords" content="GBNF, grammar, llama.cpp, local LLM, structured output, JSON, Rust, eris-agent" />
+  <link rel="canonical" href="https://eris-system.dev/blog/gbnf-grammars.html" />
+
+  <meta property="og:title" content="How I use GBNF grammars to make small local models stop hallucinating JSON" />
+  <meta property="og:description"
+    content="Grammar-constrained generation at the token level: zero protocol failures on 8B models." />
+  <meta property="og:url" content="https://eris-system.dev/blog/gbnf-grammars.html" />
+  <meta property="og:image" content="https://eris-system.dev/assets/og-image.png" />
+  <meta property="og:type" content="article" />
+  <meta property="article:author" content="Jan Paul Dahlke" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="../assets/eris_logo.png" />
+  <link rel="stylesheet" href="../css/theme.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" />
+  <style>
+    pre.code[class*="language-"] {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+
+    pre.code code[class*="language-"] {
+      font-family: var(--font);
+      font-size: inherit;
+    }
+
+    .token.comment,
+    .token.prolog,
+    .token.doctype,
+    .token.cdata {
+      color: var(--muted);
+    }
+
+    .token.keyword {
+      color: #7c3aed;
+    }
+
+    .token.function {
+      color: #0a6b55;
+    }
+
+    .token.string,
+    .token.char {
+      color: #b45309;
+    }
+
+    .token.number {
+      color: #1456a8;
+    }
+
+    .token.operator {
+      color: var(--text);
+    }
+
+    .token.punctuation {
+      color: var(--muted);
+    }
+
+    .token.macro.property {
+      color: #7c3aed;
+    }
+
+    .token.attribute {
+      color: #7c3aed;
+    }
+
+    .token.type-definition,
+    .token.class-name {
+      color: #0e7490;
+    }
+  </style>
+</head>
+
+<body>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="brand" href="../index.html">
+        <img class="brand__mark" src="../assets/eris_logo.svg" width="36" height="36" alt="" />
+        <span class="brand__text">
+          <span class="brand__name">ERIS</span>
+          <span class="brand__tag">local-first vault agent</span>
+        </span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="../index.html#pillars">About</a>
+        <a href="../index.html#why">Why</a>
+        <a href="../index.html#architecture">Architecture</a>
+        <a href="../blog/" class="nav--active">Blog</a>
+        <a href="https://github.com/janpauldahlke/eris">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <article class="blog-post">
+      <div class="wrap">
+        <div class="blog-post__header">
+          <a href="../blog/" class="blog-post__back">&larr; all posts</a>
+          <span class="section__label">[dev blog]</span>
+          <h1>How I use GBNF grammars to make small local models stop hallucinating JSON</h1>
+          <p class="blog-post__subtitle">
+            Or: why your 8B model keeps breaking your agent's tool protocol, and what you can do about it at the token
+            level.
+          </p>
+          <p class="blog-post__meta">Jan Paul Dahlke · July 2026</p>
+        </div>
+
+        <div class="blog-post__body">
+
+          <p>
+            I've been building <a href="https://github.com/janpauldahlke/eris">Eris</a>, a local-first AI agent written
+            in Rust. It sits on your machine, reads and writes an Obsidian-compatible Markdown vault, and calls tools
+            (memory, reminders, web fetch, email, calendar) through a structured JSON protocol. The LLM backend is
+            llama.cpp, the models are 8-26B GGUFs, and nothing leaves your machine unless you explicitly opt in.
+          </p>
+          <p>
+            The single hardest engineering problem in the whole project wasn't the orchestrator, the TUI, or the
+            semantic
+            memory layer. It was this:
+          </p>
+          <p class="blog-post__callout">
+            <strong>Getting a small local model to reliably emit valid, schema-conformant JSON.</strong>
+          </p>
+          <p>
+            This post is about how I solved it with GBNF grammars (compiled per-session and narrowed per-turn) and why I
+            think this approach generalises to anyone building tool-calling agents on local models.
+          </p>
+
+          <h2>The problem: small models are sloppy with JSON</h2>
+          <p>
+            If you've tried to build an agent on a local 8B or even 12B model, you know the drill. You tell the model to
+            respond in JSON. It does, mostly. Then on turn 47 it:
+          </p>
+          <ul>
+            <li>Forgets a closing brace</li>
+            <li>Adds a trailing comma in an array</li>
+            <li>Invents a tool name that doesn't exist (<code>vault_read</code> instead of <code>vault:read</code>)</li>
+            <li>Wraps its JSON in a markdown code fence</li>
+            <li>Emits valid JSON followed by a paragraph of conversational text</li>
+            <li>Returns <code>"args": "path=notes/today.md"</code> instead of
+              <code>"args": {"path": "notes/today.md"}</code>
+            </li>
+          </ul>
+          <p>
+            Ollama's <code>format: json</code> helps a bit. It constrains output to <em>some</em> valid JSON, but it
+            says
+            nothing about <em>which</em> JSON. Your tool protocol schema isn't enforced. The model can return
+            <code>{"sure": "here is your file"}</code> and that's perfectly valid JSON. It just isn't a valid tool call.
+          </p>
+          <p>
+            OpenAI and Anthropic solve this with server-side function-calling APIs. But we're running locally. We don't
+            have that luxury. We have something better.
+          </p>
+
+          <h2>GBNF: constraining generation at the token level</h2>
+          <p>
+            llama.cpp supports <a href="https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md">GBNF
+              grammars</a>, a BNF-like format that constrains which tokens the sampler is allowed to emit. If a token
+            would
+            produce a string that can't be extended into a valid parse of the grammar, it gets masked out
+            <em>before</em>
+            sampling. The model literally cannot generate malformed output. Not 'usually doesn't'. Cannot.
+          </p>
+          <p>
+            This is a fundamentally different thing from prompt-engineering the model to 'please respond in JSON'. It's
+            a
+            hard constraint on the sampler, enforced at every single token position.
+          </p>
+          <p>
+            Eris compiles a GBNF grammar at session start that defines the exact shape of its protocol envelope. Here's
+            the skeleton from <code>src/engine/grammar/envelope.rs</code>:
+          </p>
+          <pre class="code"><code>const STATIC_GRAMMAR: &amp;str = r#"root ::= "{" ws thought-kv "," ws status-kv "," ws message-kv "," ws toolcalls-kv ws "}"
+
+ws ::= [ \t\n]*
+
+thought-kv ::= "\"thought\"" ws ":" ws json-string
+status-kv  ::= "\"status\"" ws ":" ws status-enum
+message-kv ::= "\"message_to_user\"" ws ":" ws (json-string | "null")
+toolcalls-kv ::= "\"tool_calls\"" ws ":" ws "[" ws tool-call-list ws "]"
+
+status-enum ::= "\"Task\"" | "\"Reflect\"" | "\"Idle\"" | "\"Process\""
+"#;</code></pre>
+          <p>
+            Every LLM response <em>must</em> be a JSON object with exactly four keys: <code>thought</code>
+            (chain-of-thought, always present), <code>status</code> (one of four enum values),
+            <code>message_to_user</code> (string or null), and <code>tool_calls</code> (array of name+args objects). The
+            model can't deviate. It can't add a fifth key. It can't misspell <code>tool_calls</code>. It can't emit a
+            status value that doesn't exist in the enum.
+          </p>
+          <p>
+            The tool call shape itself gets appended depending on whether we're in static mode (any JSON object for
+            args)
+            or dynamic mode (per-tool typed args):
+          </p>
+          <pre class="code"><code>/// Per-tool dynamic-args version: tool-call dispatches into `tool-with-args`.
+const TOOL_CALL_RULES_DYNAMIC: &amp;str = r#"tool-call-list ::= "" | tool-call ("," ws tool-call)*
+tool-call ::= "{" ws "\"name\"" ws ":" ws tool-with-args ws "}"
+"#;</code></pre>
+          <p>
+            Notice <code>tool-with-args</code> here. That's where it gets interesting.
+          </p>
+
+          <h2>Compiling JSON Schema to GBNF rules</h2>
+          <p>
+            Tool arguments are where small models really struggle. A <code>vault:read</code> call needs
+            <code>{"relative_path": "some/file.md"}</code>. A <code>web:fetch</code> call needs
+            <code>{"url": "https://..."}</code>. Without constraints, the model will happily call
+            <code>vault:read</code> with <code>{"file": "notes.md"}</code> (wrong key name, schema validation fails,
+            recovery turn wasted).
+          </p>
+          <p>
+            Eris goes further: it compiles each tool's JSON Schema into GBNF rules at startup. The schemas come from
+            Rust
+            structs via <code>schemars</code>, so the types are the source of truth. Here's the compiler entry point in
+            <code>src/engine/grammar/schema_to_gbnf.rs</code>:
+          </p>
+          <pre class="code"><code>pub fn schema_to_gbnf_rule(
+    tool_name: &amp;str,
+    schema: &amp;RootSchema,
+) -&gt; Option&lt;(String, Vec&lt;GbnfRule&gt;)&gt; {
+    let rule_name = tool_name_to_rule_name(tool_name);
+    let mut ctx = CompileCtx {
+        definitions: &amp;schema.definitions,
+        extra_rules: Vec::new(),
+        depth: 0,
+    };
+
+    let body = compile_schema_object(&amp;schema.schema, &amp;rule_name, &amp;mut ctx)?;
+    let mut rules = vec![(rule_name.clone(), body)];
+    rules.extend(ctx.extra_rules);
+    Some((rule_name, rules))
+}</code></pre>
+          <p>
+            A <code>GbnfRule</code> is just a <code>(String, String)</code> tuple: rule name and rule body. The compiler
+            walks the JSON Schema tree and emits GBNF productions for each type it finds. Objects become key-value
+            sequences with required fields unconditional and optional fields wrapped in <code>(...)?</code>. Strings
+            with
+            enums become GBNF alternations. Arrays get a helper list rule. <code>$ref</code> pointers get resolved
+            against the definitions map.
+          </p>
+          <p>
+            The object compiler is the meatiest part. It sorts properties (required first, then optional, alphabetically
+            within each group) and emits them with proper comma handling:
+          </p>
+          <pre class="code"><code>fn compile_object(
+    validation: Option&lt;&amp;ObjectValidation&gt;,
+    parent_rule_name: &amp;str,
+    ctx: &amp;mut CompileCtx&lt;'_&gt;,
+) -&gt; Option&lt;String&gt; {
+    // ... validation checks, depth guard (MAX_DEPTH = 2) ...
+
+    let required_set: std::collections::HashSet&lt;&amp;str&gt; = validation
+        .required.iter().map(|s| s.as_str()).collect();
+
+    // Sort: required first (alphabetically), then optional (alphabetically).
+    let all_fields: Vec&lt;&amp;FieldInfo&gt; = required_fields
+        .iter().chain(optional_fields.iter()).copied().collect();
+
+    let mut parts = Vec::new();
+    for (i, field) in all_fields.iter().enumerate() {
+        let kv = format!(
+            "\"\\\"{}\\\"\" ws \":\" ws {}",
+            field.key, field.expr
+        );
+        if i == 0 {
+            if field.required {
+                parts.push(kv);
+            } else {
+                parts.push(format!("({kv} )?"));
+            }
+        } else if field.required {
+            parts.push(format!("ws \",\" ws {kv}"));
+        } else {
+            parts.push(format!("(ws \",\" ws {kv} )?"));
+        }
+    }
+
+    let body = format!("\"{{\" ws {} ws \"}}\"", parts.join(" "));
+    Some(body)
+}</code></pre>
+          <p>So for a Rust struct like this:</p>
+          <pre class="code"><code>#[derive(JsonSchema, Deserialize)]
+struct VaultWriteArgs {
+    relative_path: String,
+    content: String,
+    mode: WriteMode,  // enum: "overwrite" | "append"
+}</code></pre>
+          <p>The compiler produces GBNF rules roughly like:</p>
+          <pre class="code"><code>vault-write-args ::= "{" ws "\"content\"" ws ":" ws json-string
+                      ws "," ws "\"mode\"" ws ":" ws ("\"overwrite\"" | "\"append\"")
+                      ws "," ws "\"relative_path\"" ws ":" ws json-string ws "}"</code></pre>
+          <p>
+            If the model emits <code>"vault:write"</code> as the tool name, the sampler <em>forces</em> the args to
+            conform to <code>vault-write-args</code>. The model can't use the wrong key. It can't pass a number where a
+            string is required. It can't use a mode value that isn't <code>overwrite</code> or <code>append</code>. The
+            schema is literally part of the grammar.
+          </p>
+          <p>Arrays work too. For a tool with <code>tags: Vec&lt;String&gt;</code>, the compiler emits a helper list
+            rule:</p>
+          <pre class="code"><code>fn compile_array(
+    validation: Option&lt;&amp;ArrayValidation&gt;,
+    parent_rule_name: &amp;str,
+    ctx: &amp;mut CompileCtx&lt;'_&gt;,
+) -&gt; Option&lt;String&gt; {
+    let items_expr = match validation.and_then(|v| v.items.as_ref()) {
+        Some(SingleOrVec::Single(item_schema)) =&gt; match item_schema.as_ref() {
+            Schema::Object(obj) =&gt; {
+                let item_rule = format!("{parent_rule_name}-item");
+                compile_schema_object(obj, &amp;item_rule, ctx)
+                    .unwrap_or("json-value".into())
+            }
+            Schema::Bool(true) =&gt; "json-value".into(),
+            Schema::Bool(false) =&gt; return Some("\"[\" ws \"]\"".into()),
+        },
+        // ...
+        None =&gt; "json-value".into(),
+    };
+
+    let list_rule_name = format!("{parent_rule_name}-list");
+    let list_body = format!("{items_expr} (\",\" ws {items_expr})*");
+    ctx.extra_rules.push((list_rule_name.clone(), list_body));
+
+    Some(format!("\"[\" ws ({list_rule_name})? ws \"]\""))
+}</code></pre>
+          <p>Which produces something like:</p>
+          <pre class="code"><code>test-array-args-tags-list ::= json-string ("," ws json-string)*</code></pre>
+          <p>
+            The depth guard (<code>MAX_DEPTH = 2</code>) prevents the compiler from chasing recursive schemas forever.
+            If
+            a schema is too complex (deeply nested <code>oneOf</code>, recursive types, free-form
+            <code>additionalProperties</code> with no fixed keys), the compiler returns <code>None</code> and the tool
+            falls back to a generic <code>json-object</code> rule. Graceful degradation, not a crash.
+          </p>
+
+          <h2>Per-turn grammar narrowing: the real trick</h2>
+          <p>
+            Here's the thing that really moves the needle for small models: Eris doesn't give the model the full 50-tool
+            grammar on every turn.
+          </p>
+          <p>
+            Before each LLM call, the orchestrator runs a <strong>ToolRouter</strong>, a semantic similarity search
+            using
+            the same embedding model as vector memory. The user's message gets embedded and compared against precomputed
+            vectors for each tool (built from tool names, descriptions, and routing hints). Only tools above a cosine
+            similarity threshold make the cut.
+          </p>
+          <p>
+            The GBNF grammar is then recompiled to include <em>only those tools</em>. If the user says 'what time is
+            it',
+            the grammar's <code>tool-with-args</code> alternation might contain only <code>clock:now</code>. The model
+            can't call <code>vault:write</code> even if it wanted to. Those tokens simply aren't available to the
+            sampler.
+          </p>
+          <p>
+            The subset cache lives in <code>src/orchestrator/core/llama_gbnf_subset.rs</code>:
+          </p>
+          <pre class="code"><code>pub(crate) fn get_or_compile_subset(
+    &amp;self,
+    gatekeeper: &amp;Gatekeeper,
+    tool_names: &amp;[String],
+) -&gt; Result&lt;Arc&lt;str&gt;&gt; {
+    let mut sorted: Vec&lt;String&gt; = tool_names.to_vec();
+    sorted.sort();
+    let key: String = if sorted.is_empty() {
+        CACHE_KEY_NO_TOOLS.to_string()
+    } else {
+        sorted.join("\x1e")  // ASCII record separator as cache key
+    };
+
+    let mut guard = self.inner.lock().map_err(|_| {
+        FcpError::EngineFault("GBNF subset cache mutex poisoned".to_string())
+    })?;
+
+    if let Some(hit) = guard.get(&amp;key) {
+        return Ok(Arc::clone(hit));
+    }
+
+    // Cache miss: compile grammar for exactly these tools
+    let entries: Vec&lt;ToolGrammarEntry&gt; = sorted
+        .iter()
+        .map(|name| {
+            let per_tool_rules = gatekeeper
+                .parameters_root_schema_for(name)
+                .and_then(|schema| schema_to_gbnf_rule(name, &amp;schema))
+                .map(|(_rule_name, rules)| rules);
+
+            ToolGrammarEntry {
+                name: name.clone(),
+                per_tool_rules,
+            }
+        })
+        .collect();
+
+    let compiled = compile_fcp_envelope_grammar_dynamic(&amp;entries);
+    let arc: Arc&lt;str&gt; = Arc::from(compiled.into_boxed_str());
+    guard.insert(key, arc.clone());
+    Ok(arc)
+}</code></pre>
+          <p>
+            Same tool set on a different turn? Cache hit, no recompilation. The <code>Arc&lt;str&gt;</code> keeps the
+            compiled grammar around cheaply.
+          </p>
+          <p>
+            And here's how the orchestrator picks which grammar to use on each LLM call, from the main cognitive loop in
+            <code>src/orchestrator/core/step.rs</code>:
+          </p>
+          <pre class="code"><code>let (grammar_override, attach_session_grammar) = if !self.config.is_llamacpp() {
+    (None, true)  // Ollama: no grammar support, skip
+} else if !tools_needed {
+    // No tools matched this turn: compile empty grammar (forces tool_calls: [])
+    let g = self.gbnf_subset_cache
+        .get_or_compile_subset(&amp;self.gatekeeper, &amp;[])?;
+    (Some(g), true)
+} else if !targeted_tools.is_empty() {
+    // Recovery/retry: only the specific tools we're retrying
+    let names: Vec&lt;String&gt; = targeted_tools.iter().cloned().collect();
+    let g = self.gbnf_subset_cache
+        .get_or_compile_subset(&amp;self.gatekeeper, &amp;names)?;
+    (Some(g), true)
+} else if slim_assembly {
+    // Normal path: pre-LLM router's top-K matched tools
+    let offered = slim_offered_tool_names(
+        &amp;pre_llm_matched_tools,
+        self.tool_map_offer_cap,
+        moltbook_overlay_latched,
+        &amp;self.gatekeeper,
+        &amp;self.state,
+    );
+    if offered.is_empty() {
+        (None, true)  // fall back to full session grammar
+    } else {
+        let g = self.gbnf_subset_cache
+            .get_or_compile_subset(&amp;self.gatekeeper, &amp;offered)?;
+        (Some(g), true)
+    }
+} else {
+    (None, true)  // full tool roster, session grammar
+};</code></pre>
+          <p>
+            Four branches, four different grammar scopes. The <code>!tools_needed</code> case is fun: when the router
+            decides the user is just chatting (no tools relevant), the grammar still enforces the protocol envelope but
+            compiles with an empty tool list. That means <code>tool_calls</code> can only be <code>[]</code>. The model
+            physically cannot hallucinate a tool call when the router says 'this is just conversation'.
+          </p>
+          <p>This has two effects:</p>
+          <ol>
+            <li><strong>Reliability goes way up.</strong> Fewer choices means fewer mistakes. An 8B model choosing
+              between
+              3 tools is dramatically more reliable than one choosing between 50.</li>
+            <li><strong>Generation is faster.</strong> A smaller grammar means less work for the constrained sampler at
+              each token position.</li>
+          </ol>
+
+          <h2>The gatekeeper: defence in depth</h2>
+          <p>
+            Grammar enforcement is necessary but not sufficient. Even with a perfect grammar, the model can still call a
+            tool with semantically wrong arguments (a valid path that doesn't exist, or an action that's not appropriate
+            in the current agent state).
+          </p>
+          <p>
+            Eris layers a <strong>Gatekeeper</strong> on top (<code>src/tools/gatekeeper.rs</code>). Every tool call
+            passes through it before execution:
+          </p>
+          <pre class="code"><code>pub async fn execute_tool(
+    &amp;self,
+    state: &amp;AgentState,
+    name: &amp;str,
+    args: Value,
+) -&gt; Result&lt;String&gt; {
+    // 1. State-based authorization
+    if !Self::state_allows_tool(state, name) {
+        return Err(FcpError::ToolFault {
+            tool_name: name.to_string(),
+            reason: format!("Tool not authorized in state {:?}", state),
+        });
+    }
+
+    // 2. Normalize common LLM arg-naming mistakes before validation
+    let args = normalize_tool_args(name, args);
+
+    // 3. Runtime JSON Schema validation (belt and suspenders with grammar)
+    let compiled_schema = JSONSchema::options()
+        .compile(&amp;schema_value)
+        .map_err(|e| FcpError::Config(...))?;
+    if let Err(errors) = compiled_schema.validate(&amp;args) {
+        return Err(FcpError::SchemaViolation(...));
+    }
+
+    // 4. Execute
+    let result = tool.execute(args).await?;
+
+    // 5. Semantic guard: empty results in Recover state are suspicious
+    if state == &amp;AgentState::Recover &amp;&amp; result.trim().is_empty() {
+        return Err(FcpError::ToolFault {
+            tool_name: name.to_string(),
+            reason: "Semantic Guard: Tool returned zero logic results during recovery"
+                .to_string(),
+        });
+    }
+    Ok(result)
+}</code></pre>
+          <p>
+            The arg normalization is worth a mention. Small models frequently use slightly wrong key names:
+            <code>q</code> instead of <code>query</code>, <code>path</code> instead of <code>relative_path</code>,
+            <code>top_n</code> instead of <code>max_headlines</code>. Rather than wasting a recovery turn, the
+            gatekeeper silently maps common aliases before validation:
+          </p>
+          <pre class="code"><code>fn normalize_tool_args(tool_name: &amp;str, mut args: Value) -&gt; Value {
+    let Some(obj) = args.as_object_mut() else { return args };
+
+    if tool_name == "web:search" {
+        for alias in ["q", "search_query", "search"] {
+            if let Some(val) = obj.remove(alias) {
+                if !obj.contains_key("query") {
+                    obj.insert("query".to_string(), val);
+                }
+            }
+        }
+        obj.retain(|k, _| WEB_SEARCH_KEYS.contains(&amp;k.as_str()));
+    }
+    // ... similar blocks for web:fetch, web:find, news:today,
+    //     vision:see, media:catalog (path -&gt; relative_path) ...
+    args
+}</code></pre>
+          <p>
+            This is a pragmatic concession. The grammar enforces <em>structure</em>. The normalizer handles
+            <em>naming drift</em>. The schema validator catches whatever slips through both.
+          </p>
+
+          <h2>What this looks like in practice</h2>
+          <p>
+            On the Ollama backend (no grammar), a long session with a 12B model hits about 3-5% protocol failures per
+            turn. Malformed JSON, invented tool names, trailing prose after the JSON object. Each failure costs a
+            recovery
+            turn (re-prompt with the parse error), which burns context window and adds latency.
+          </p>
+          <p>
+            On the llama.cpp backend with GBNF, protocol failures drop dramatically. Short to medium sessions are
+            essentially clean. But I won't claim zero failures: on long contexts where the model starts losing
+            coherence,
+            even grammar-constrained output can degrade. The grammar guarantees <em>syntactic</em> validity (the JSON
+            will parse, the keys will be right, the enum values will exist), but it can't fix a model that fills every
+            string field with garbage or repeats the same tool call in a loop because it's lost the plot at 28k tokens.
+          </p>
+          <p>
+            That's why Eris doesn't rely on the grammar alone. There's a bounded recovery loop that catches schema
+            violations, empty tool results, and semantic nonsense, feeds the model a concrete correction, and retries
+            with a capped budget. The grammar killed the easy failures (malformed JSON, invented tool names). The
+            recovery loop handles the rest. I'll write more about that mechanism in a follow-up post.
+          </p>
+          <p>
+            The difference in session stability is still massive. A 100-turn session on Ollama reliably degrades; the
+            same session on llama.cpp with grammar stays usable far longer. Just don't let anyone tell you it's a
+            silver bullet.
+          </p>
+
+          <h2>Bounded generation: the other half</h2>
+          <p>
+            Even with a perfect grammar, generation can go wrong if the model fills its context window mid-response.
+            llama.cpp will truncate, and your valid-so-far JSON becomes invalid because the closing braces never got
+            emitted.
+          </p>
+          <p>
+            Eris sets <code>n_predict</code> (max tokens to generate) per call, calibrated to leave room in the context
+            window for the response to actually finish. The grammar ensures structure; bounded generation ensures the
+            structure has room to close.
+          </p>
+
+          <h2>The architecture, briefly</h2>
+          <p>For context on where the grammar fits in the bigger picture:</p>
+          <ul>
+            <li><strong>Single Rust binary.</strong> ~270 source files, ~50 tools, three presentation surfaces (ratatui
+              TUI, localhost web UI via Axum+SSE, optional Discord sidecar), all sharing one orchestrator.</li>
+            <li><strong>Markdown vault as memory.</strong> Notes in an Obsidian-compatible directory tree. Tiered
+              memory:
+              ephemeral staging (in-process), committed (written to vault), semantic recall (Qdrant vector search over
+              vault chunks). Turn-start prefetch embeds the user message and injects relevant memories into the system
+              prompt before the LLM even runs.</li>
+            <li><strong>No unsafe, no panics, no println.</strong> Production code uses <code>?</code> propagation
+              through a typed error taxonomy (<code>FcpError</code>). Diagnostics go through <code>tracing</code> to
+              rotating log files under <code>.fcp/telemetry/</code>. Never to the TUI buffer. <code>println!</code>
+              would corrupt the ratatui render.</li>
+            <li><strong>Actor model concurrency.</strong> No <code>Arc&lt;Mutex&lt;T&gt;&gt;</code> shared state between
+              threads (well, except the grammar cache, which is a cold path). Communication via
+              <code>tokio::sync::mpsc</code> channels.
+            </li>
+          </ul>
+
+          <h2>Should you do this?</h2>
+          <p>
+            If you're building an agent on local models and you need structured output: yes, absolutely. GBNF grammar
+            enforcement is the single biggest reliability win I've made on this project. More impactful than prompt
+            engineering, more impactful than model selection, more impactful than retry logic.
+          </p>
+          <p>
+            The key insight is that <strong>the grammar is not a prompt.</strong> It's not a suggestion. It's a
+            constraint
+            on the sampler. The model can't violate it any more than it can output a token that doesn't exist in its
+            vocabulary. That's a qualitative difference from anything you can do with system prompts.
+          </p>
+          <p>
+            The tradeoff: you're coupled to llama.cpp (or any sampler that supports grammars; VLLM has experimental
+            support, Outlines does it differently). You need to write or compile the grammar. And very complex schemas
+            (recursive types, polymorphic unions) may not compile cleanly. But for the typical agent tool protocol (an
+            envelope with a discriminated union of tool calls) it works beautifully.
+          </p>
+
+          <h2>Try it</h2>
+          <pre class="code"><code>git clone https://github.com/janpauldahlke/eris
+cd eris &amp;&amp; cargo build --release
+docker run -d -p 6333:6333 -p 6334:6334 \
+  -v eris-qdrant-data:/qdrant/storage qdrant/qdrant
+./target/release/eris chat   # first run launches the setup wizard</code></pre>
+          <p>
+            The code is at <a href="https://github.com/janpauldahlke/eris">github.com/janpauldahlke/eris</a>. The
+            project site is <a href="https://eris-system.dev">eris-system.dev</a>. Apache 2.0. Stars and contributions
+            welcome.
+          </p>
+
+          <p class="blog-post__signoff">
+            <em>If you're working on local AI agents, structured generation, or Rust+LLM integration,
+              reach out or open an issue.</em>
+          </p>
+        </div>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>&copy; 2026 Jan Dahlke &middot; Apache 2.0</p>
+      <p>
+        This site loads no analytics, no cookies, no third-party trackers.
+        That is intentional and on-brand.
+      </p>
+      <p>
+        Built with static HTML. Deploy target: Cloudflare Pages.
+        Source lives in this site repo once public.
+      </p>
+    </div>
+  </footer>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-rust.min.js"></script>
+  <script>
+    document.querySelectorAll('pre.code code').forEach(function (block) {
+      var text = block.textContent;
+      if (/\b(fn |let |pub |struct |const |impl |use |mod |enum |match |if |else |for |while |return |async |await)\b/.test(text)) {
+        block.classList.add('language-rust');
+      } else {
+        block.classList.add('language-markup');
+      }
+    });
+    Prism.highlightAll();
+  </script>
+</body>
+
+</html>

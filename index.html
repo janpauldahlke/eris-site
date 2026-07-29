@@ -50,6 +50,7 @@
         <a href="#pillars">About</a>
         <a href="#why">Why</a>
         <a href="#architecture">Architecture</a>
+        <a href="blog/">Blog</a>
         <a href="https://github.com/janpauldahlke/eris">GitHub</a>
       </nav>
     </div>
@@ -480,6 +481,29 @@ cargo build --release
             <li>Dogfooded on Linux + NVIDIA; Apple Silicon also supported</li>
           </ul>
         </aside>
+      </div>
+    </section>
+
+    <!-- Dev blog teaser -->
+    <section class="section" id="blog" aria-labelledby="blog-title">
+      <div class="wrap">
+        <span class="section__label">[dev blog]</span>
+        <h2 id="blog-title">From the dev blog</h2>
+        <p class="section__lede">Engineering notes on building Eris.</p>
+        <div class="blog-list">
+          <a href="blog/gbnf-grammars.html" class="blog-card">
+            <span class="blog-card__date">July 2026</span>
+            <h3 class="blog-card__title">How I use GBNF grammars to make small local models stop hallucinating JSON</h3>
+            <p class="blog-card__excerpt">
+              Why your 8B model keeps breaking your agent's tool protocol, and what you can do about it at the token
+              level. Compiled per-session, narrowed per-turn, zero protocol failures.
+            </p>
+            <span class="blog-card__read">Read post &rarr;</span>
+          </a>
+        </div>
+        <p style="margin-top: 1.25rem; font-size: 0.875rem;">
+          <a href="blog/">All posts &rarr;</a>
+        </p>
       </div>
     </section>
 

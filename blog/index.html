@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dev blog — Eris</title>
+  <meta name="description" content="Engineering notes on building a local-first AI agent in Rust." />
+  <link rel="canonical" href="https://eris-system.dev/blog/" />
+
+  <meta property="og:title" content="Eris dev blog" />
+  <meta property="og:description" content="Engineering notes on building a local-first AI agent in Rust." />
+  <meta property="og:url" content="https://eris-system.dev/blog/" />
+  <meta property="og:image" content="https://eris-system.dev/assets/og-image.png" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="../assets/eris_logo.png" />
+  <link rel="stylesheet" href="../css/theme.css" />
+</head>
+
+<body>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="brand" href="../index.html">
+        <img class="brand__mark" src="../assets/eris_logo.svg" width="36" height="36" alt="" />
+        <span class="brand__text">
+          <span class="brand__name">ERIS</span>
+          <span class="brand__tag">local-first vault agent</span>
+        </span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="../index.html#pillars">About</a>
+        <a href="../index.html#why">Why</a>
+        <a href="../index.html#architecture">Architecture</a>
+        <a href="../blog/" class="nav--active">Blog</a>
+        <a href="https://github.com/janpauldahlke/eris">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="section" style="border-top: none;">
+      <div class="wrap">
+        <span class="section__label">[dev blog]</span>
+        <h1 style="margin: 0 0 0.65rem; font-size: 1.25rem; font-weight: 600; color: var(--text-strong); line-height: 1.35;">
+          Dev blog
+        </h1>
+        <p class="section__lede">Engineering notes on building a local-first AI agent in Rust.</p>
+
+        <div class="blog-list">
+          <a href="gbnf-grammars.html" class="blog-card">
+            <span class="blog-card__date">July 2026</span>
+            <h2 class="blog-card__title">How I use GBNF grammars to make small local models stop hallucinating JSON</h2>
+            <p class="blog-card__excerpt">
+              Why your 8B model keeps breaking your agent's tool protocol, and what you can do about it at the token
+              level. Compiled per-session, narrowed per-turn, zero protocol failures.
+            </p>
+            <span class="blog-card__read">Read post &rarr;</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>&copy; 2026 Jan Dahlke &middot; Apache 2.0</p>
+      <p>
+        This site loads no analytics, no cookies, no third-party trackers.
+        That is intentional and on-brand.
+      </p>
+      <p>
+        Built with static HTML. Deploy target: Cloudflare Pages.
+        Source lives in this site repo once public.
+      </p>
+    </div>
+  </footer>
+</body>
+
+</html>
