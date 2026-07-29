@@ -1081,6 +1081,47 @@ pre.code code {
   color: var(--muted);
 }
 
+.blog-toc {
+  margin-bottom: 2rem;
+  padding: 0.85rem 1.1rem;
+  background: var(--thought-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.8125rem;
+  line-height: 1.8;
+  color: var(--muted);
+}
+
+.blog-toc strong {
+  color: var(--text-strong);
+  margin-right: 0.35rem;
+}
+
+.blog-toc a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.blog-toc a:hover {
+  color: var(--accent);
+}
+
+.blog-toc__list {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0;
+}
+
+.blog-toc__list li {
+  padding: 0.15rem 0;
+}
+
+.blog-toc__list li::before {
+  content: "·";
+  margin-right: 0.5rem;
+  color: var(--border);
+}
+
 .nav--active {
   color: var(--accent) !important;
   font-weight: 600;

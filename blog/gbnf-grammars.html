@@ -119,6 +119,20 @@
           <p class="blog-post__meta">Jan Paul Dahlke · July 2026</p>
         </div>
 
+        <nav class="blog-toc" aria-label="Table of contents">
+          <strong>In this post:</strong>
+          <ul class="blog-toc__list">
+            <li><a href="#problem">The problem</a></li>
+            <li><a href="#gbnf">GBNF &amp; token-level constraints</a></li>
+            <li><a href="#schema-compiler">Schema &rarr; GBNF compiler</a></li>
+            <li><a href="#narrowing">Per-turn grammar narrowing</a></li>
+            <li><a href="#gatekeeper">The gatekeeper</a></li>
+            <li><a href="#practice">What this looks like in practice</a></li>
+            <li><a href="#bounded">Bounded generation</a></li>
+            <li><a href="#should-you">Should you do this?</a></li>
+          </ul>
+        </nav>
+
         <div class="blog-post__body">
 
           <p>
@@ -140,7 +154,7 @@
             think this approach generalises to anyone building tool-calling agents on local models.
           </p>
 
-          <h2>The problem: small models are sloppy with JSON</h2>
+          <h2 id="problem">The problem: small models are sloppy with JSON</h2>
           <p>
             If you've tried to build an agent on a local 8B or even 12B model, you know the drill. You tell the model to
             respond in JSON. It does, mostly. Then on turn 47 it:
@@ -166,7 +180,7 @@
             have that luxury. We have something better.
           </p>
 
-          <h2>GBNF: constraining generation at the token level</h2>
+          <h2 id="gbnf">GBNF: constraining generation at the token level</h2>
           <p>
             llama.cpp supports <a href="https://github.com/ggml-org/llama.cpp/blob/master/grammars/README.md">GBNF
               grammars</a>, a BNF-like format that constrains which tokens the sampler is allowed to emit. If a token
@@ -215,7 +229,7 @@ tool-call ::= "{" ws "\"name\"" ws ":" ws tool-with-args ws "}"
             Notice <code>tool-with-args</code> here. That's where it gets interesting.
           </p>
 
-          <h2>Compiling JSON Schema to GBNF rules</h2>
+          <h2 id="schema-compiler">Compiling JSON Schema to GBNF rules</h2>
           <p>
             Tool arguments are where small models really struggle. A <code>vault:read</code> call needs
             <code>{"relative_path": "some/file.md"}</code>. A <code>web:fetch</code> call needs
@@ -347,7 +361,7 @@ struct VaultWriteArgs {
             falls back to a generic <code>json-object</code> rule. Graceful degradation, not a crash.
           </p>
 
-          <h2>Per-turn grammar narrowing: the real trick</h2>
+          <h2 id="narrowing">Per-turn grammar narrowing: the real trick</h2>
           <p>
             Here's the thing that really moves the needle for small models: Eris doesn't give the model the full 50-tool
             grammar on every turn.
@@ -455,7 +469,7 @@ struct VaultWriteArgs {
             Four branches, four different grammar scopes. The <code>!tools_needed</code> case is fun: when the router
             decides the user is just chatting (no tools relevant), the grammar still enforces the protocol envelope but
             compiles with an empty tool list. That means <code>tool_calls</code> can only be <code>[]</code>. The model
-            physically cannot hallucinate a tool call when the router says 'this is just conversation'.
+            simply cannot hallucinate a tool call when the router says 'this is just conversation'.
           </p>
           <p>This has two effects:</p>
           <ol>
@@ -466,7 +480,7 @@ struct VaultWriteArgs {
               each token position.</li>
           </ol>
 
-          <h2>The gatekeeper: defence in depth</h2>
+          <h2 id="gatekeeper">The gatekeeper: defence in depth</h2>
           <p>
             Grammar enforcement is necessary but not sufficient. Even with a perfect grammar, the model can still call a
             tool with semantically wrong arguments (a valid path that doesn't exist, or an action that's not appropriate
@@ -542,7 +556,7 @@ struct VaultWriteArgs {
             <em>naming drift</em>. The schema validator catches whatever slips through both.
           </p>
 
-          <h2>What this looks like in practice</h2>
+          <h2 id="practice">What this looks like in practice</h2>
           <p>
             On the Ollama backend (no grammar), a long session with a 12B model hits about 3-5% protocol failures per
             turn. Malformed JSON, invented tool names, trailing prose after the JSON object. Each failure costs a
@@ -569,7 +583,7 @@ struct VaultWriteArgs {
             silver bullet.
           </p>
 
-          <h2>Bounded generation: the other half</h2>
+          <h2 id="bounded">Bounded generation: the other half</h2>
           <p>
             Even with a perfect grammar, generation can go wrong if the model fills its context window mid-response.
             llama.cpp will truncate, and your valid-so-far JSON becomes invalid because the closing braces never got
@@ -601,7 +615,7 @@ struct VaultWriteArgs {
             </li>
           </ul>
 
-          <h2>Should you do this?</h2>
+          <h2 id="should-you">Should you do this?</h2>
           <p>
             If you're building an agent on local models and you need structured output: yes, absolutely. GBNF grammar
             enforcement is the single biggest reliability win I've made on this project. More impactful than prompt
