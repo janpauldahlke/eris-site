@@ -47,9 +47,10 @@
         </span>
       </a>
       <nav class="nav" aria-label="Primary">
-        <a href="#pillars">About</a>
-        <a href="#why">Why</a>
-        <a href="#architecture">Architecture</a>
+        <a href="#pillars">Overview</a>
+        <a href="#quickstart">Quickstart</a>
+        <a href="#scope">Features</a>
+        <a href="#deeper">Deep dive</a>
         <a href="blog/">Blog</a>
         <a href="https://github.com/janpauldahlke/eris">GitHub</a>
       </nav>
@@ -64,43 +65,43 @@
           <h1 id="hero-title">Eris</h1>
           <p class="hero__pitch">
             A local-first agent in a single Rust binary: your Markdown vault as memory,
-            grammar-enforced tool calls on llama.cpp, nothing leaves your machine unless you say so.
-          </p>
-          <p class="hero__expand">
-            A personal agent over your Obsidian-compatible vault: reads and writes notes,
-            remembers across sessions through tiered memory, and calls tools through a JSON
-            protocol structurally enforced by GBNF grammars.
+            grammar-enforced tool calls on llama.cpp.
+            Nothing leaves your machine unless you say so.
           </p>
           <div class="hero__meta">
-            <span class="status-pill">Alpha · v0.1.0-alpha · Linux + GPU · Apache 2.0</span>
+            <span class="status-pill">Alpha · v0.1.1-alpha · Linux + macOS · Apache 2.0</span>
           </div>
           <div class="cta-row">
-            <a class="btn-primary" href="https://github.com/janpauldahlke/eris">View on GitHub</a>
-            <a class="btn-secondary"
-              href="https://github.com/janpauldahlke/eris/tree/main/docs/updated_architecture">Architecture docs</a>
+            <a class="btn-primary" href="#quickstart">Get Started</a>
+            <a class="btn-secondary" href="https://github.com/janpauldahlke/eris">View on GitHub</a>
           </div>
+          <p class="hero__alt">
+            Prefer to understand first?
+            <a href="blog/gbnf-grammars.html">How GBNF keeps small models honest &rarr;</a>
+          </p>
         </div>
       </div>
-      <div class="wrap wrap--wide" style="margin-top: 2rem;">
+      <div class="wrap wrap--wide hero__media-wrap">
         <figure class="screenshot-frame hero__media">
           <img src="assets/web-console-light_1.png" width="1024" height="576"
             alt="Eris web console: chat, thought panel, telemetry, and status metrics." />
           <figcaption>
-            Web console: chat, THOUGHT, TELEMETRY, and status bar. Same session as the TUI.
+            Web console: chat, thought, telemetry, and status — same session as the TUI.
           </figcaption>
         </figure>
       </div>
     </section>
 
-    <!-- 2. Three pillars -->
+    <!-- 2. Pillars -->
     <section class="section" id="pillars" aria-labelledby="pillars-title">
       <div class="wrap">
         <span class="section__label">[pillars]</span>
-        <h2 id="pillars-title">Three things that define Eris</h2>
+        <h2 id="pillars-title">Why Eris is different</h2>
         <p class="section__lede">Sovereign architecture, grammar-disciplined tools, vault-native memory.</p>
         <div class="grid-3">
           <article class="panel">
             <h3>Sovereign by architecture</h3>
+            <p class="panel__summary">Your vault stays on your machine. Outbound is opt-in.</p>
             <p>
               No telemetry. Your vault is plain Markdown you own. Every outbound integration
               (web fetch, mail, calendar, Discord) is opt-in and enumerable. The semantic index
@@ -109,15 +110,16 @@
           </article>
           <article class="panel">
             <h3>Grammar-disciplined tools</h3>
+            <p class="panel__summary">No function-calling API required. Token-level GBNF does the work.</p>
             <p>
               Local 8-26B models are sloppy with JSON. Eris compiles GBNF grammars per session,
               and narrowed per-turn subset grammars, so output is constrained at the token level.
-              ~63 tools pass through one Gatekeeper (JSON Schema + per-state allowlists).
-              No function-calling API required.
+              63+ tools pass through one Gatekeeper (JSON Schema + per-state allowlists).
             </p>
           </article>
           <article class="panel">
             <h3>Vault-native memory</h3>
+            <p class="panel__summary">The working directory is the vault. Memory is files, not a black box.</p>
             <p>
               Your working directory <em>is</em> the vault. Tiered recall: ephemeral staging (moka),
               committed notes on disk, semantic search (Qdrant). Prefetch and reindex-on-write keep
@@ -125,91 +127,48 @@
             </p>
           </article>
         </div>
+
+        <aside class="compare-callout" aria-label="Why not just Ollama">
+          <h3>Why not just Ollama + a chat UI?</h3>
+          <p>
+            Ollama gives you a model. Eris gives you an agent with memory, 63 gated tools,
+            and a vault that's yours. Same local backend, radically different capability ceiling.
+          </p>
+        </aside>
       </div>
     </section>
 
-    <!-- 3. Reliability & tools -->
-    <section class="section" id="reliability" aria-labelledby="reliability-title">
+    <!-- 3. Why I built this (trust signal, early) -->
+    <section class="section" id="why" aria-labelledby="why-title">
       <div class="wrap">
-        <span class="section__label">[reliability]</span>
-        <h2 id="reliability-title">Why small local models still work</h2>
-        <p class="section__lede">
-          Recovery, gatekeeping, an extensible tool roster, and Rust: how the harness stays reliable on 8-26B models.
-        </p>
-        <ol class="reliability-list">
-          <li class="reliability-item">
-            <div class="reliability-item__meta">
-              <span class="reliability-item__num">01</span>
-              <h3>Self-healing recovery</h3>
-            </div>
-            <p>
-              Small models still drift: wrong tool args, tool I/O faults, incomplete turns.
-              Eris treats those as <strong>recoverable protocol events</strong>, not crashes.
-              A bounded <strong>Recover</strong> loop feeds the model a concrete correction
-              (what failed, what shape is expected) and retries, capped by
-              <code>max_recovery_attempts</code>. Grammar prevents most malformed JSON;
-              recovery catches what remains.
-            </p>
-          </li>
-          <li class="reliability-item">
-            <div class="reliability-item__meta">
-              <span class="reliability-item__num">02</span>
-              <h3>Gatekeeper-controlled tools</h3>
-            </div>
-            <p>
-              Every tool call goes through one gate: <strong>state allowlist</strong>
-              (Chat / Reflect / Idle / Recover each sees a different set) →
-              <strong>arg normalization</strong> (common LLM key mistakes) →
-              <strong>JSON Schema validation</strong> → execute. Operators can enable/disable
-              tool families in config and from the web Tools console.
-            </p>
-            <p>
-              The gatekeeper is a <em>protocol</em> boundary for the model, not a security
-              sandbox against a malicious local user.
-            </p>
-          </li>
-          <li class="reliability-item">
-            <div class="reliability-item__meta">
-              <span class="reliability-item__num">03</span>
-              <h3>A tool roster you can grow</h3>
-            </div>
-            <p>
-              Out of the box: vault read/write/list, memory stage/commit/query, agenda &amp; alarms,
-              web fetch/search via
-              <a href="https://github.com/alejandroqh/browser39">browser39</a>
-              (allowlist + consent), weather, wiki, system health, plus optional
-              vision, mail/calendar, Discord. New tools are a first-class extension path: implement
-              the <code>Tool</code> trait, register with the gatekeeper, add a descriptor TOML,
-              allowlist by state.
-              See
-              <a
-                href="https://github.com/janpauldahlke/eris/blob/main/docs/HOW_TO/ADDING_A_TOOL.md">ADDING_A_TOOL.md</a>.
-              Full roster:
-              <a href="https://github.com/janpauldahlke/eris/blob/main/docs/TOOLS.md">TOOLS.md</a>.
-            </p>
-            <p class="tool-roster">
-              <span class="tool-roster__label">examples</span>
-              [tool] vault:write · memory:query · agenda:remind_at · web:fetch · vision:see
-            </p>
-          </li>
-          <li class="reliability-item">
-            <div class="reliability-item__meta">
-              <span class="reliability-item__num">04</span>
-              <h3>Rust, on purpose</h3>
-            </div>
-            <p>
-              One binary. Memory-safe by default: <strong>no <code>unsafe</code></strong>,
-              no panics in production paths (<code>?</code> + <code>FcpError</code>).
-              Actor-model concurrency (<code>mpsc</code>, not shared <code>Mutex</code>) keeps
-              the orchestrator responsive under tool rounds. Fast enough for a full-screen TUI
-              and a localhost web console on the same machine as the model.
-            </p>
-          </li>
-        </ol>
+        <span class="section__label">[why]</span>
+        <h2 id="why-title">Why I built this</h2>
+        <div class="why-box prose">
+          <p>
+            I started Eris by toying around with a local model and a Markdown vault, not a company roadmap.
+            The spark was practical: I wanted a <strong>deterministic loop around an LLM</strong>
+            (inspired by OpenClaw's idea of a tight, inspectable agent cycle), wired to tools and memory I control.
+          </p>
+          <p>
+            Two fears pushed me to keep it local. First: if the interesting part of an idea lives only in a
+            hosted chat, it is already halfway someone else's product. Second: if every half-formed thought
+            ships to a cloud log, you start editing yourself. With Eris, nothing leaves the machine unless
+            I flip an opt-in switch, so I can be blunt with the agent about drafts, doubts, and vault chaos.
+          </p>
+          <p>
+            I am a <strong>solo developer</strong>. I know projects like Odysseus and Hermes exist in the same space.
+            That is fine. Eris is still the system I run every day, and I would rather share a real codebase
+            under Apache 2.0 than sit on it until it is “perfect.” This is public source: read it, build it, judge it.
+          </p>
+          <p class="why-box__close">
+            If you are also building a local harness: steal the patterns, file issues, or fork. That is the point.
+          </p>
+          <p class="signoff">- Jan</p>
+        </div>
       </div>
     </section>
 
-    <!-- 4. One brain, three faces -->
+    <!-- 4. Surfaces -->
     <section class="section" id="faces" aria-labelledby="faces-title">
       <div class="wrap">
         <span class="section__label">[surfaces]</span>
@@ -236,234 +195,31 @@
         <figure class="screenshot-frame demo-block">
           <img src="assets/demo.gif" width="960" height="540"
             alt="Eris web console session: chat with thought and telemetry panels updating live." />
-          <figcaption>Web console session recording: thought + telemetry on a live turn.</figcaption>
+          <figcaption>Web console session: thought + telemetry on a live turn.</figcaption>
         </figure>
       </div>
     </section>
 
-    <!-- 5. Architecture -->
-    <section class="section" id="architecture" aria-labelledby="arch-title">
-      <div class="wrap">
-        <span class="section__label">[architecture]</span>
-        <h2 id="arch-title">How it works</h2>
-        <p class="section__lede">Tools and memory are first-class, not buried under “orchestrator.”</p>
-        <div class="arch-diagram" role="img"
-          aria-label="Architecture diagram: surfaces to orchestrator to llama.cpp, with gatekeeper tools and memory">
-          <pre>
-┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
-│  TUI / Web  │────▶│   Orchestrator   │────▶│ llama.cpp   │
-│  / Discord  │◀────│  + Recover loop  │◀────│  (GBNF)     │
-└─────────────┘     └────────┬─────────┘     └─────────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              ▼                             ▼
-     ┌─────────────────┐          ┌─────────────────┐
-     │ Gatekeeper      │          │ Memory          │
-     │ → ~63 Tools     │          │ Vault (Markdown)│
-     │ (schema+state)  │          │ Ephemeral(moka) │
-     └─────────────────┘          │ Qdrant (embed)  │
-                                  └─────────────────┘
-</pre>
-        </div>
-        <p class="arch-copy">
-          Same <code>SessionEvent</code> / <code>UserAction</code> layer across all surfaces.
-          On each tool turn: GBNF constrains the JSON envelope → <strong>Gatekeeper</strong>
-          checks state allowlist + schema → <strong>tool</strong> runs → failures enter Recover
-          with a bounded retry. <strong>Memory</strong> is always in the loop: vault notes on disk,
-          ephemeral staging for the session, Qdrant for semantic recall. Surfaces stay thin;
-          the orchestrator owns the loop.
-        </p>
-      </div>
-    </section>
-
-    <!-- 6. What Eris is / is not + hardware -->
-    <section class="section" id="about" aria-labelledby="about-title">
-      <div class="wrap">
-        <span class="section__label">[about]</span>
-        <h2 id="about-title">What Eris is, and is not</h2>
-        <div class="is-isnot" style="margin-top: 1.25rem;">
-          <article class="panel">
-            <h3>Is</h3>
-            <ul>
-              <li>A <strong>Rust</strong> reference architecture for sovereign local LLM pipelines: actor model, zero
-                <code>unsafe</code>, zero panics in production paths, single binary
-              </li>
-              <li>The most reliable harness for the GGUF you can run locally: grammar + gatekeeper + recovery, not
-                “smarter model”</li>
-              <li>Smarter <em>about your data</em> than anything hosted: lives where your notes live</li>
-              <li>Extensible: add tools without forking the orchestrator</li>
-            </ul>
-          </article>
-          <article class="panel panel--not">
-            <h3>Is not</h3>
-            <ul>
-              <li>Smarter than hosted frontier models (intelligence ceiling = your local model)</li>
-              <li>A private ChatGPT replacement (wrong comparison; wrong expectations)</li>
-              <li>A security sandbox (gatekeeper = protocol boundary for the LLM, not anti-malware)</li>
-            </ul>
-          </article>
-        </div>
-
-        <h3 style="margin: 2rem 0 0.75rem; font-size: 1rem; color: var(--text-strong);">Hardware honesty</h3>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Setup</th>
-                <th scope="col">Experience</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Apple Silicon, 16&nbsp;GB+</td>
-                <td>Good: 7-12B chat + embed, Metal</td>
-              </tr>
-              <tr>
-                <td>Apple Silicon, 32&nbsp;GB+</td>
-                <td>Comfortable: 26B-class, vision mmproj</td>
-              </tr>
-              <tr>
-                <td>Linux + NVIDIA 16&nbsp;GB VRAM</td>
-                <td>Suggested: Gemma&nbsp;4 12B, ~32k context, vision</td>
-              </tr>
-              <tr>
-                <td>Linux + NVIDIA 8&nbsp;GB+ VRAM</td>
-                <td>Good with GPU layer tuning; smaller quants</td>
-              </tr>
-              <tr>
-                <td>CPU-only</td>
-                <td>Runs; small quants only; slow</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <figure class="screenshot-frame" style="margin-top: 1.25rem;">
-          <img src="assets/gpu_metrics.png" width="937" height="540"
-            alt="nvidia-smi showing llama-server using about 13 GB VRAM on an RTX 4080." />
-          <figcaption>
-            Suggested stack on ~16&nbsp;GB VRAM: <strong>Gemma&nbsp;4 12B</strong> via
-            <code>llama-server</code> (shown: RTX&nbsp;4080, ~13&nbsp;GB loaded).
-            Comfortable for ~32k context with headroom for vision.
-          </figcaption>
-        </figure>
-
-        <aside class="senses" aria-label="Local vision and speech">
-          <span class="section__label">[senses]</span>
-          <h3>Local can see and hear now</h3>
-          <p class="senses__lede">
-            Models keep getting better, and the weights you can run at home caught up.
-            Vision and speech are no longer cloud-only tricks.
-          </p>
-          <ul class="senses__list">
-            <li>
-              <span class="senses__tag">[vision]</span>
-              <span><code>vision:see</code> on a multimodal GGUF: images from your vault, same gated tool path.</span>
-            </li>
-            <li>
-              <span class="senses__tag">[listen]</span>
-              <span>Speech-to-text ingress: talk into the session without shipping audio off-machine.</span>
-            </li>
-            <li>
-              <span class="senses__tag">[stack]</span>
-              <span>Gemma&nbsp;4 12B on 16&nbsp;GB VRAM is the sweet spot we run: chat + ~32k context + vision
-                headroom.</span>
-            </li>
-          </ul>
-          <p class="senses__note">
-            Vision and voice are hardware-gated: same binary, need the right GGUF stack.
-            Chat, vault, memory, and the tool protocol are always on.
-          </p>
-        </aside>
-      </div>
-    </section>
-
-    <!-- Why I built this -->
-    <section class="section" id="why" aria-labelledby="why-title">
-      <div class="wrap">
-        <span class="section__label">[why]</span>
-        <h2 id="why-title">Why I built this</h2>
-        <div class="why-box">
-          <p>
-            I started Eris by toying around with a local model and a Markdown vault, not a company roadmap.
-            The spark was practical: I wanted a <strong>deterministic loop around an LLM</strong>
-            (inspired by OpenClaw's idea of a tight, inspectable agent cycle), wired to tools and memory I control.
-          </p>
-          <p>
-            Two fears pushed me to keep it local. First: if the interesting part of an idea lives only in a
-            hosted chat, it is already halfway someone else's product. Second: if every half-formed thought
-            ships to a cloud log, you start editing yourself. With Eris, nothing leaves the machine unless
-            I flip an opt-in switch, so I can be blunt with the agent about drafts, doubts, and vault chaos.
-          </p>
-          <p>
-            I am a <strong>solo developer</strong>. I know projects like Odysseus and Hermes exist in the same space.
-            That is fine. Eris is still the system I run every day, and I would rather share a real codebase
-            under Apache 2.0 than sit on it until it is “perfect.” This is public source: read it, build it, judge it.
-          </p>
-          <p class="why-box__close">
-            If you are also building a local harness: steal the patterns, file issues, or fork. That is the point.
-          </p>
-          <p class="signoff">- Jan</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- 7. What's in the box -->
-    <section class="section" id="scope" aria-labelledby="scope-title">
-      <div class="wrap">
-        <span class="section__label">[scope]</span>
-        <h2 id="scope-title">What's in the box</h2>
-        <p class="section__lede">Same binary. Different layers of setup.</p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Layer</th>
-                <th scope="col">What</th>
-                <th scope="col">When</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Always on</td>
-                <td>Chat (TUI + web), vault read/write/list, Gatekeeper + GBNF (llama.cpp), tiered memory (ephemeral +
-                  vault + Qdrant), agenda / alarms</td>
-                <td>First <code>eris chat</code> after wizard + Qdrant</td>
-              </tr>
-              <tr>
-                <td>Opt-in</td>
-                <td>Web fetch (<a href="https://github.com/alejandroqh/browser39">browser39</a>, allowlist + consent),
-                  weather, wiki, Discord sidecar, Google mail/calendar, Moltbook</td>
-                <td>Config flag / credentials</td>
-              </tr>
-              <tr>
-                <td>Hardware-gated</td>
-                <td>Vision (<code>vision:see</code>), voice ingress (STT)</td>
-                <td>Multimodal GGUF + mmproj / ffmpeg; ~16&nbsp;GB VRAM stack</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p class="panel panel--thought" style="margin-top: 1.25rem;">
-          Opt-in and hardware-gated features ship in the same binary. They are not afterthoughts;
-          they are just not required to chat with your vault.
-        </p>
-        <p class="feature-line" style="margin-top: 1.25rem;">
-          Backend: llama.cpp is the canonical production backend. Ollama is supported as easier install with weaker JSON
-          discipline.
-        </p>
-      </div>
-    </section>
-
-    <!-- 8. Quickstart -->
+    <!-- 5. Quickstart -->
     <section class="section" id="quickstart" aria-labelledby="quickstart-title">
       <div class="wrap">
         <span class="section__label">[quickstart]</span>
         <h2 id="quickstart-title">Quickstart (honest)</h2>
-        <p class="section__lede">No one-click install yet. This is the real path.</p>
+        <p class="section__lede">
+          No one-click install yet. First setup is a focused evening
+          (Rust, llama-server, models, Qdrant). Day two is <code>eris chat</code>.
+        </p>
+
+        <ul class="prereq-list" aria-label="Prerequisites">
+          <li>Rust (stable, edition 2024)</li>
+          <li><code>llama-server</code> + a chat GGUF + an embedding GGUF</li>
+          <li>Docker (for Qdrant semantic memory)</li>
+        </ul>
+
         <pre class="code"><code># Qdrant (semantic memory)
 docker run -d -p 6333:6333 -v eris-qdrant-data:/qdrant/storage qdrant/qdrant
 
-# Build (requires Rust, llama-server, GGUF models; see docs)
+# Build
 cargo build --release
 ./target/release/eris chat          # first-run wizard
 ./target/release/eris chat --web    # same session, web UI</code></pre>
@@ -484,7 +240,313 @@ cargo build --release
       </div>
     </section>
 
-    <!-- Dev blog teaser -->
+    <!-- 6. What's in the box -->
+    <section class="section" id="scope" aria-labelledby="scope-title">
+      <div class="wrap">
+        <span class="section__label">[scope]</span>
+        <h2 id="scope-title">What's in the box</h2>
+        <p class="section__lede">Same binary. Different layers of setup.</p>
+        <div class="table-wrap">
+          <table class="tier-table">
+            <thead>
+              <tr>
+                <th scope="col">Layer</th>
+                <th scope="col">What</th>
+                <th scope="col">When</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="tier-row tier-row--always">
+                <td><span class="tier-badge tier-badge--always">Always on</span></td>
+                <td>Chat (TUI + web), vault read/write/list, Gatekeeper + GBNF (llama.cpp), tiered memory (ephemeral +
+                  vault + Qdrant), agenda / alarms</td>
+                <td>First <code>eris chat</code> after wizard + Qdrant</td>
+              </tr>
+              <tr class="tier-row tier-row--optin">
+                <td><span class="tier-badge tier-badge--optin">Opt-in</span></td>
+                <td>Web fetch (<a href="https://github.com/alejandroqh/browser39">browser39</a>, allowlist + consent),
+                  weather, wiki, Discord sidecar, Google mail/calendar, Moltbook</td>
+                <td>Config flag / credentials</td>
+              </tr>
+              <tr class="tier-row tier-row--hardware">
+                <td><span class="tier-badge tier-badge--hardware">Hardware-gated</span></td>
+                <td>Vision (<code>vision:see</code>), voice ingress (STT)</td>
+                <td>Multimodal GGUF + mmproj / ffmpeg; ~16&nbsp;GB VRAM stack</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="panel panel--thought" style="margin-top: 1.25rem;">
+          Opt-in and hardware-gated features ship in the same binary. They are not afterthoughts;
+          they are just not required to chat with your vault.
+        </p>
+        <p class="feature-line" style="margin-top: 1.25rem;">
+          Backend: llama.cpp is the canonical production backend. Ollama is supported as easier install with weaker JSON
+          discipline.
+        </p>
+      </div>
+    </section>
+
+    <!-- 7. Dig deeper (architecture, reliability, about) -->
+    <section class="section" id="deeper" aria-labelledby="deeper-title">
+      <div class="wrap">
+        <span class="section__label">[deep dive]</span>
+        <h2 id="deeper-title">Dig deeper</h2>
+        <p class="section__lede">
+          Architecture, reliability engineering, and hardware honesty — for when you want the full picture.
+        </p>
+
+        <details class="deep-panel" id="architecture">
+          <summary>
+            <span class="deep-panel__label">Architecture</span>
+            <span class="deep-panel__title">How it works</span>
+          </summary>
+          <div class="deep-panel__body">
+            <p class="section__lede">Tools and memory are first-class, not buried under “orchestrator.”</p>
+
+            <div class="arch-flow" role="img"
+              aria-label="Architecture diagram: surfaces to orchestrator to llama.cpp, with gatekeeper tools and memory">
+              <div class="arch-flow__row">
+                <div class="arch-box">TUI / Web / Discord</div>
+                <span class="arch-flow__arrow" aria-hidden="true">→</span>
+                <div class="arch-box arch-box--core">Orchestrator<br /><span>+ Recover loop</span></div>
+                <span class="arch-flow__arrow" aria-hidden="true">→</span>
+                <div class="arch-box">llama.cpp<br /><span>(GBNF)</span></div>
+              </div>
+              <div class="arch-flow__branch">
+                <div class="arch-box arch-box--tools">
+                  <strong>Gatekeeper</strong>
+                  <span>63+ tools · schema + state</span>
+                </div>
+                <div class="arch-box arch-box--memory">
+                  <strong>Memory</strong>
+                  <span>Vault · ephemeral · Qdrant</span>
+                </div>
+              </div>
+            </div>
+
+            <details class="arch-ascii">
+              <summary>ASCII diagram</summary>
+              <div class="arch-diagram">
+                <pre>
+┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
+│  TUI / Web  │────▶│   Orchestrator   │────▶│ llama.cpp   │
+│  / Discord  │◀────│  + Recover loop  │◀────│  (GBNF)     │
+└─────────────┘     └────────┬─────────┘     └─────────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼                             ▼
+     ┌─────────────────┐          ┌─────────────────┐
+     │ Gatekeeper      │          │ Memory          │
+     │ → 63+ Tools     │          │ Vault (Markdown)│
+     │ (schema+state)  │          │ Ephemeral(moka) │
+     └─────────────────┘          │ Qdrant (embed)  │
+                                  └─────────────────┘
+</pre>
+              </div>
+            </details>
+
+            <p class="arch-copy">
+              Same <code>SessionEvent</code> / <code>UserAction</code> layer across all surfaces.
+              On each tool turn: GBNF constrains the JSON envelope → <strong>Gatekeeper</strong>
+              checks state allowlist + schema → <strong>tool</strong> runs → failures enter Recover
+              with a bounded retry. <strong>Memory</strong> is always in the loop: vault notes on disk,
+              ephemeral staging for the session, Qdrant for semantic recall. Surfaces stay thin;
+              the orchestrator owns the loop.
+            </p>
+          </div>
+        </details>
+
+        <details class="deep-panel" id="reliability">
+          <summary>
+            <span class="deep-panel__label">Reliability</span>
+            <span class="deep-panel__title">Why small local models still work</span>
+          </summary>
+          <div class="deep-panel__body">
+            <p class="section__lede">
+              Recovery, gatekeeping, an extensible tool roster, and Rust: how the harness stays reliable on 8-26B
+              models.
+            </p>
+            <ol class="reliability-list">
+              <li class="reliability-item">
+                <div class="reliability-item__meta">
+                  <span class="reliability-item__num">01</span>
+                  <h3>Self-healing recovery</h3>
+                </div>
+                <p>
+                  Small models still drift: wrong tool args, tool I/O faults, incomplete turns.
+                  Eris treats those as <strong>recoverable protocol events</strong>, not crashes.
+                  A bounded <strong>Recover</strong> loop feeds the model a concrete correction
+                  (what failed, what shape is expected) and retries, capped by
+                  <code>max_recovery_attempts</code>. Grammar prevents most malformed JSON;
+                  recovery catches what remains.
+                </p>
+              </li>
+              <li class="reliability-item">
+                <div class="reliability-item__meta">
+                  <span class="reliability-item__num">02</span>
+                  <h3>Gatekeeper-controlled tools</h3>
+                </div>
+                <p>
+                  Every tool call goes through one gate: <strong>state allowlist</strong>
+                  (Chat / Reflect / Idle / Recover each sees a different set) →
+                  <strong>arg normalization</strong> (common LLM key mistakes) →
+                  <strong>JSON Schema validation</strong> → execute. Operators can enable/disable
+                  tool families in config and from the web Tools console.
+                </p>
+                <p>
+                  The gatekeeper is a <em>protocol</em> boundary for the model, not a security
+                  sandbox against a malicious local user.
+                </p>
+              </li>
+              <li class="reliability-item">
+                <div class="reliability-item__meta">
+                  <span class="reliability-item__num">03</span>
+                  <h3>A tool roster you can grow</h3>
+                </div>
+                <p>
+                  Out of the box: vault read/write/list, memory stage/commit/query, agenda &amp; alarms,
+                  web fetch/search via
+                  <a href="https://github.com/alejandroqh/browser39">browser39</a>
+                  (allowlist + consent), weather, wiki, system health, plus optional
+                  vision, mail/calendar, Discord. New tools are a first-class extension path: implement
+                  the <code>Tool</code> trait, register with the gatekeeper, add a descriptor TOML,
+                  allowlist by state.
+                  See
+                  <a
+                    href="https://github.com/janpauldahlke/eris/blob/main/docs/HOW_TO/ADDING_A_TOOL.md">ADDING_A_TOOL.md</a>.
+                  Full roster:
+                  <a href="https://github.com/janpauldahlke/eris/blob/main/docs/TOOLS.md">TOOLS.md</a>.
+                </p>
+                <p class="tool-roster">
+                  <span class="tool-roster__label">examples</span>
+                  [tool] vault:write · memory:query · agenda:remind_at · web:fetch · vision:see
+                </p>
+              </li>
+              <li class="reliability-item">
+                <div class="reliability-item__meta">
+                  <span class="reliability-item__num">04</span>
+                  <h3>Rust, on purpose</h3>
+                </div>
+                <p>
+                  One binary. Memory-safe by default: <strong>no <code>unsafe</code></strong>,
+                  no panics in production paths (<code>?</code> + <code>FcpError</code>).
+                  Actor-model concurrency (<code>mpsc</code>, not shared <code>Mutex</code>) keeps
+                  the orchestrator responsive under tool rounds. Fast enough for a full-screen TUI
+                  and a localhost web console on the same machine as the model.
+                </p>
+              </li>
+            </ol>
+          </div>
+        </details>
+
+        <details class="deep-panel" id="about">
+          <summary>
+            <span class="deep-panel__label">About</span>
+            <span class="deep-panel__title">What Eris is, and is not · Hardware</span>
+          </summary>
+          <div class="deep-panel__body">
+            <div class="is-isnot">
+              <article class="panel">
+                <h3>Is</h3>
+                <ul>
+                  <li>A <strong>Rust</strong> reference architecture for sovereign local LLM pipelines: actor model,
+                    zero
+                    <code>unsafe</code>, zero panics in production paths, single binary
+                  </li>
+                  <li>The most reliable harness for the GGUF you can run locally: grammar + gatekeeper + recovery, not
+                    “smarter model”</li>
+                  <li>Smarter <em>about your data</em> than anything hosted: lives where your notes live</li>
+                  <li>Extensible: add tools without forking the orchestrator</li>
+                </ul>
+              </article>
+              <article class="panel panel--not">
+                <h3>Is not</h3>
+                <ul>
+                  <li>Smarter than hosted frontier models (intelligence ceiling = your local model)</li>
+                  <li>A private ChatGPT replacement (wrong comparison; wrong expectations)</li>
+                  <li>A security sandbox (gatekeeper = protocol boundary for the LLM, not anti-malware)</li>
+                </ul>
+              </article>
+            </div>
+
+            <h3 class="deep-subhead">Hardware honesty</h3>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Setup</th>
+                    <th scope="col">Experience</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Linux + NVIDIA 16&nbsp;GB VRAM</td>
+                    <td>Suggested: Gemma&nbsp;4 12B, ~32k context, vision</td>
+                  </tr>
+                  <tr>
+                    <td>Linux + NVIDIA 8&nbsp;GB+ VRAM</td>
+                    <td>Good with GPU layer tuning; smaller quants</td>
+                  </tr>
+                  <tr>
+                    <td>Apple Silicon, 16&nbsp;GB+</td>
+                    <td>Good: 7-12B chat + embed, Metal</td>
+                  </tr>
+                  <tr>
+                    <td>Apple Silicon, 32&nbsp;GB+</td>
+                    <td>Comfortable: 26B-class, vision mmproj</td>
+                  </tr>
+                  <tr>
+                    <td>CPU-only</td>
+                    <td>Runs; small quants only; slow</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <figure class="screenshot-frame" style="margin-top: 1.25rem;">
+              <img src="assets/gpu_metrics.png" width="937" height="540"
+                alt="nvidia-smi showing llama-server using about 13 GB VRAM on an RTX 4080." />
+              <figcaption>
+                Suggested stack on ~16&nbsp;GB VRAM: <strong>Gemma&nbsp;4 12B</strong> via
+                <code>llama-server</code> (shown: RTX&nbsp;4080, ~13&nbsp;GB loaded).
+                Comfortable for ~32k context with headroom for vision.
+              </figcaption>
+            </figure>
+
+            <aside class="senses" aria-label="Local vision and speech">
+              <span class="section__label">[senses]</span>
+              <h3>Local can see and hear now</h3>
+              <p class="senses__lede">
+                Models keep getting better, and the weights you can run at home caught up.
+                Vision and speech are no longer cloud-only tricks.
+              </p>
+              <ul class="senses__list">
+                <li>
+                  <span class="senses__tag">[vision]</span>
+                  <span><code>vision:see</code> on a multimodal GGUF: images from your vault, same gated tool
+                    path.</span>
+                </li>
+                <li>
+                  <span class="senses__tag">[listen]</span>
+                  <span>Speech-to-text ingress: talk into the session without shipping audio off-machine.</span>
+                </li>
+                <li>
+                  <span class="senses__tag">[stack]</span>
+                  <span>Gemma&nbsp;4 12B on 16&nbsp;GB VRAM is the sweet spot we run: chat + ~32k context + vision
+                    headroom.</span>
+                </li>
+              </ul>
+              <p class="senses__note">
+                Vision and voice are hardware-gated: same binary, need the right GGUF stack.
+                Chat, vault, memory, and the tool protocol are always on.
+              </p>
+            </aside>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- 8. Dev blog -->
     <section class="section" id="blog" aria-labelledby="blog-title">
       <div class="wrap">
         <span class="section__label">[dev blog]</span>
@@ -494,7 +556,7 @@ cargo build --release
           <a href="blog/gbnf-grammars.html" class="blog-card">
             <span class="blog-card__date">July 2026</span>
             <h3 class="blog-card__title">How I use GBNF grammars to make small local models stop hallucinating JSON</h3>
-            <p class="blog-card__excerpt">
+            <p class="blog-card__excerpt prose">
               Why your 8B model keeps breaking your agent's tool protocol, and what you can do about it at the token
               level. Compiled per-session, narrowed per-turn, zero protocol failures.
             </p>
@@ -507,75 +569,106 @@ cargo build --release
       </div>
     </section>
 
-    <!-- Links -->
+    <!-- 9. Links -->
     <section class="section" id="links" aria-labelledby="links-title">
       <div class="wrap">
         <span class="section__label">[links]</span>
         <h2 id="links-title">Links &amp; community</h2>
-        <ul class="link-list">
-          <li>
-            <span class="key">GitHub</span>
-            <a href="https://github.com/janpauldahlke/eris">github.com/janpauldahlke/eris</a>
-          </li>
-          <li>
-            <span class="key">Discord</span>
-            <a href="https://discord.gg/6ReAymfjY">Eris-systems</a>
-            <span style="color: var(--muted); font-size: 0.85rem;">optional; hang out / ask questions</span>
-          </li>
-          <li>
-            <span class="key">Issues</span>
-            <span>GitHub Issues &amp; Discussions still work if you prefer async</span>
-          </li>
-          <li>
-            <span class="key">Security</span>
-            <a href="https://github.com/janpauldahlke/eris/blob/main/SECURITY.md">SECURITY.md</a>
-            · report to <a href="mailto:jandareal@gmail.com">jandareal@gmail.com</a>
-          </li>
-          <li>
-            <span class="key">Contributing</span>
-            <a href="https://github.com/janpauldahlke/eris/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>
-            · DCO sign-off
-          </li>
-          <li>
-            <span class="key">Tool roster</span>
-            <a href="https://github.com/janpauldahlke/eris/blob/main/docs/TOOLS.md">TOOLS.md</a>
-            <span style="color: var(--muted); font-size: 0.85rem;">full gatekeeper inventory</span>
-          </li>
-          <li>
-            <span class="key">Web browsing</span>
-            <a href="https://github.com/alejandroqh/browser39">browser39</a>
-            <span>by Alejandro. Headless browser for agents; we use it and it works well.</span>
-          </li>
-          <li>
-            <span class="key">Search tag</span>
-            <code>#eris-agent</code>
-            <span style="color: var(--muted); font-size: 0.85rem;">(avoids name collisions)</span>
-          </li>
-        </ul>
 
-        <p class="name-note">
-          <strong>Eris</strong> is named for the Greek goddess of strife and the golden apple of discord.
-          She forced a choice; so does going local.
-          Hosted chat is convenient until your drafts and doubts live in someone else's log.
-          Eris stays on your machine and productively disturbs <em>your</em> vault: read, write, remember, remind.
-        </p>
+        <div class="link-groups">
+          <div class="link-group">
+            <h3 class="link-group__title">Get involved</h3>
+            <ul class="link-list">
+              <li>
+                <span class="key">GitHub</span>
+                <a href="https://github.com/janpauldahlke/eris">github.com/janpauldahlke/eris</a>
+              </li>
+              <li>
+                <span class="key">Discord</span>
+                <a href="https://discord.gg/6ReAymfjY">Eris-systems</a>
+                <span class="link-note">optional; hang out / ask questions</span>
+              </li>
+              <li>
+                <span class="key">Contributing</span>
+                <a href="https://github.com/janpauldahlke/eris/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>
+                · DCO sign-off
+              </li>
+              <li>
+                <span class="key">Issues</span>
+                <span>GitHub Issues &amp; Discussions still work if you prefer async</span>
+              </li>
+              <li>
+                <span class="key">Blog</span>
+                <a href="blog/">Dev blog</a>
+                <span class="link-note">engineering notes</span>
+              </li>
+            </ul>
+          </div>
+          <div class="link-group">
+            <h3 class="link-group__title">Reference</h3>
+            <ul class="link-list">
+              <li>
+                <span class="key">Tool roster</span>
+                <a href="https://github.com/janpauldahlke/eris/blob/main/docs/TOOLS.md">TOOLS.md</a>
+                <span class="link-note">full gatekeeper inventory</span>
+              </li>
+              <li>
+                <span class="key">Security</span>
+                <span class="link-value">
+                  <a href="https://github.com/janpauldahlke/eris/blob/main/SECURITY.md">SECURITY.md</a>
+                  <span class="link-note">report to
+                    <a href="mailto:admin@eris-system.dev">admin@eris-system.dev</a>
+                    or
+                    <a href="mailto:jandareal@gmail.com">jandareal@gmail.com</a>
+                  </span>
+                </span>
+              </li>
+              <li>
+                <span class="key">Web browsing</span>
+                <a href="https://github.com/alejandroqh/browser39">browser39</a>
+                <span>by Alejandro. Headless browser for agents; we use it and it works well.</span>
+              </li>
+              <li>
+                <span class="key">Search tag</span>
+                <code>#eris-agent</code>
+                <span class="link-note">(avoids name collisions)</span>
+              </li>
+            </ul>
+          </div>
+        </div>
       </div>
     </section>
   </main>
 
   <footer class="site-footer">
     <div class="wrap">
-      <p>© 2026 Jan Dahlke · Apache 2.0</p>
+      <p>© 2026 Jan Dahlke · Apache 2.0 · Built with Rust 🦀</p>
       <p>
         This site loads no analytics, no cookies, no third-party trackers.
         That is intentional and on-brand.
       </p>
       <p>
         Built with static HTML. Deploy target: Cloudflare Pages.
-        Source lives in this site repo once public.
+        Source:
+        <a href="https://github.com/janpauldahlke/eris-site">github.com/janpauldahlke/eris-site</a>
       </p>
     </div>
   </footer>
+  <script>
+    (function () {
+      function openFromHash() {
+        var id = location.hash.slice(1);
+        if (!id) return;
+        var el = document.getElementById(id);
+        if (el && el.tagName === "DETAILS") {
+          el.open = true;
+          el.scrollIntoView({ block: "start" });
+        }
+      }
+      openFromHash();
+      window.addEventListener("hashchange", openFromHash);
+    })();
+  </script>
 </body>
 
 </html>
