@@ -1369,6 +1369,29 @@ pre.code code {
   color: var(--muted);
 }
 
+.blog-post__figure {
+  margin: 0 0 2rem;
+  max-width: 36rem;
+}
+
+.blog-post__figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.blog-post__figure figcaption {
+  margin-top: 0.55rem;
+  font-family: var(--font-prose);
+  font-size: 0.8125rem;
+  font-style: italic;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .blog-post__body {
   font-family: var(--font-prose);
   font-size: 1.05rem;

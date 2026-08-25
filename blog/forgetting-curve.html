@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+      I built a forgetting curve for an agent with one user — Eris dev blog
+    </title>
+    <meta
+      name="description"
+      content="What I learned building a promotion-score ladder and decay daemon for Eris memory: I overbuilt the clever part, and then kept it anyway."
+    />
+    <meta
+      name="keywords"
+      content="agent memory, forgetting curve, Markdown vault, Rust, local LLM, eris-agent, Zettelkasten"
+    />
+    <link
+      rel="canonical"
+      href="https://eris-system.dev/blog/forgetting-curve.html"
+    />
+
+    <meta
+      property="og:title"
+      content="I built a forgetting curve for an agent with one user"
+    />
+    <meta
+      property="og:description"
+      content="What I learned, mostly: I overbuilt the clever part, and then kept it anyway."
+    />
+    <meta
+      property="og:url"
+      content="https://eris-system.dev/blog/forgetting-curve.html"
+    />
+    <meta
+      property="og:image"
+      content="https://eris-system.dev/assets/og-image.png"
+    />
+    <meta property="og:type" content="article" />
+    <meta property="article:author" content="Jan Paul Dahlke" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="../assets/eris_logo.png" />
+    <link rel="stylesheet" href="../css/theme.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css"
+    />
+    <style>
+      pre.code[class*="language-"] {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1rem 1.1rem;
+        font-size: 0.8rem;
+        line-height: 1.5;
+      }
+
+      pre.code code[class*="language-"] {
+        font-family: var(--font);
+        font-size: inherit;
+      }
+
+      .token.comment,
+      .token.prolog,
+      .token.doctype,
+      .token.cdata {
+        color: var(--muted);
+      }
+
+      .token.keyword {
+        color: #7c3aed;
+      }
+
+      .token.function {
+        color: #0a6b55;
+      }
+
+      .token.string,
+      .token.char {
+        color: #b45309;
+      }
+
+      .token.number {
+        color: #1456a8;
+      }
+
+      .token.operator {
+        color: var(--text);
+      }
+
+      .token.punctuation {
+        color: var(--muted);
+      }
+
+      .token.macro.property {
+        color: #7c3aed;
+      }
+
+      .token.attribute {
+        color: #7c3aed;
+      }
+
+      .token.type-definition,
+      .token.class-name {
+        color: #0e7490;
+      }
+
+      .blog-post__body .table-wrap {
+        margin: 0 0 1.25rem;
+        max-width: 42rem;
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="../index.html">
+          <img
+            class="brand__mark"
+            src="../assets/eris_logo.svg"
+            width="36"
+            height="36"
+            alt=""
+          />
+          <span class="brand__text">
+            <span class="brand__name">ERIS</span>
+            <span class="brand__tag">local-first vault agent</span>
+          </span>
+        </a>
+        <nav class="nav" aria-label="Primary">
+          <a href="../index.html#pillars">Overview</a>
+          <a href="../index.html#quickstart">Quickstart</a>
+          <a href="../index.html#scope">Features</a>
+          <a href="../index.html#deeper">Deep dive</a>
+          <a href="../blog/" class="nav--active">Blog</a>
+          <a href="https://github.com/janpauldahlke/eris">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <article class="blog-post">
+        <div class="wrap">
+          <div class="blog-post__header">
+            <a href="../blog/" class="blog-post__back">&larr; all posts</a>
+            <span class="section__label">[dev blog]</span>
+            <h1>I built a forgetting curve for an agent with one user</h1>
+            <p class="blog-post__subtitle">
+              What I learned, mostly: I overbuilt the clever part, and then kept
+              it anyway.
+            </p>
+            <p class="blog-post__meta">Jan Paul Dahlke · August 2026</p>
+          </div>
+
+          <figure class="blog-post__figure">
+            <img
+              src="../assets/lethe.webp"
+              width="859"
+              height="400"
+              alt="Sepia engraving of a woman drifting over the River Lethe among reeds, after Gustave Doré."
+            />
+            <figcaption>
+              The River Lethe &mdash; Gustave Doré / Héliodore Pisan. Forgetting
+              as design, not failure.
+            </figcaption>
+          </figure>
+
+          <nav class="blog-toc" aria-label="Table of contents">
+            <strong>In this post:</strong>
+            <ul class="blog-toc__list">
+              <li><a href="#ladder">What the ladder looks like</a></li>
+              <li><a href="#scores">How scores go up, and why it breaks</a></li>
+              <li><a href="#concurrency">The one concurrency exception</a></li>
+              <li><a href="#actually-for">What it was actually for</a></li>
+              <li><a href="#retrieval">What retrieval was already doing</a></li>
+              <li><a href="#inversion">The deeper inversion</a></li>
+              <li>
+                <a href="#zettelkasten">Zettelkasten, a graph never walked</a>
+              </li>
+              <li>
+                <a href="#overambition">Why this is an overambition story</a>
+              </li>
+            </ul>
+          </nav>
+
+          <div class="blog-post__body">
+            <p>
+              In Greek myth the dead drink from the Lethe before they cross into
+              the underworld. River of forgetting. The water washes the old life
+              out so the soul can move on, and the part I always liked is that
+              forgetting there is not a flaw in the design. It is the point.
+              Without it nothing ever gets lighter.
+            </p>
+            <p>
+              I liked that picture a bit too much when I built memory for
+              <a href="https://github.com/janpauldahlke/eris">Eris</a>.
+            </p>
+            <p>
+              There is a second thing I never believed in: keeping the whole
+              chat as &ldquo;memory&rdquo;. Dumping every single turn into long
+              term storage, that is not remembering, that is hoarding. Somebody
+              has to sit down and decide, this one stays, this one can go. Human
+              or agent, does not matter, same job. A vault should stay a place
+              you curated and not a landfill of old transcripts.
+            </p>
+            <p>
+              So I went and modelled human memory on purpose. Not as a cute
+              comment somewhere in the code. As actual behaviour. Things you
+              touch again should rise, things nobody touches should slowly fade.
+              Decay was my Lethe, a slow drain on a float, so the agent would
+              not drown in every little staging decision it ever made. A mention
+              in the chat pushed the value back up a bit. For a personal agent
+              that sits on a Markdown vault this felt serious. Grown up, even.
+            </p>
+            <p>
+              And then the serious thing turned into a small economics model.
+            </p>
+            <p>
+              Every staged memory carries a <code>promotion_score: f64</code>.
+              There is a background pass, it wakes up every two minutes, takes a
+              fixed bite out of the score (that is the decay), and then maybe it
+              pushes the entry one rung up the ladder, Session to Scratch to
+              Promote, or one rung back down when the score got too low. Staging
+              something explicitly with <code>memory:stage</code> gives a bigger
+              bump. Get over the threshold, longer TTL. Fall under half of the
+              threshold that got you into your current tier, and back down you
+              go. My own little forgetting curve. I was pretty proud of it,
+              honestly.
+            </p>
+            <p>
+              It compiles. Tests green. And after running this on my own vault
+              since months, here is the summary in the short version:
+            </p>
+            <p class="blog-post__callout">
+              <strong
+                >I never once looked at a Scratch tier score and made any
+                decision from it.</strong
+              >
+            </p>
+            <p>
+              Which sounds like I forgot why the numbers were there in the first
+              place. I did not forget. The idea was never that <em>I</em> watch
+              a dashboard. The idea was a
+              <strong>memory curation mode</strong> for later: the agent, when
+              idle or in a dedicated pass, walks its own staged memory, looks at
+              score and tier, then decides what to keep, what to merge, what to
+              demote, what to finally commit. The hippocampus theatre, that was
+              the metaphor. The real reader of those floats was supposed to be
+              the model itself, some gardener style loop that, well, does not
+              exist yet.
+            </p>
+            <p>
+              So right now the river runs for an observer I never got around to
+              building. No curation mode. No walk. Thresholds are still pure gut
+              feeling. One user on the chat path, and that user is me. So the
+              scaffolding for a future curator already sits on top of the live
+              agent and slows it down. That is the mess.
+            </p>
+            <p>
+              This post is about why I should probably delete all of that, and
+              about one simple inversion: decide less when you write, rank more
+              when you read. Spoiler, so nobody feels cheated at the end: I did
+              not delete it. I keep the ladder for now. More on that later.
+              Forgetting stays good either way. I just put it in the wrong
+              corner. If you build agent memory these days, maybe check quickly
+              whether you are digging yourself the same hole.
+            </p>
+
+            <h2 id="ladder">What the ladder looks like</h2>
+            <p>
+              Eris is a local agent living on a Markdown vault. Working memory
+              is a moka cache. The long term stuff, the notes a human should
+              actually read, that is plain Markdown on disk. Semantic recall
+              goes over a vector store. All fine so far. The clever bit was this
+              one here:
+            </p>
+            <pre class="code"><code>pub enum EphemeralTier {
+    Session,  // just staged, short TTL
+    Scratch,  // "getting interesting"
+    Promote,  // eligible for memory:commit_all
+}</code></pre>
+            <p>And the ladder itself:</p>
+            <pre class="code"><code>impl EphemeralTier {
+    pub fn next(self) -&gt; Option&lt;Self&gt; {
+        match self {
+            Self::Session =&gt; Some(Self::Scratch),
+            Self::Scratch =&gt; Some(Self::Promote),
+            Self::Promote =&gt; None,
+        }
+    }
+
+    pub fn prev(self) -&gt; Option&lt;Self&gt; {
+        match self {
+            Self::Session =&gt; None,
+            Self::Scratch =&gt; Some(Self::Session),
+            Self::Promote =&gt; Some(Self::Scratch),
+        }
+    }
+}</code></pre>
+            <p>
+              <code>commit_all</code> flushes only the Promote entries. Session
+              and Scratch count as &ldquo;not ready yet&rdquo;.
+            </p>
+            <p>
+              And this is exactly where it got annoying for the agent. The flow
+              was clunky to begin with, first you
+              <code>memory:stage</code>, then later
+              <code>memory:commit</code> or <code>memory:commit_all</code>.
+              Small local models, they are not great at this multi step
+              bookkeeping. So the model stages something genuinely useful, then
+              tries to flush everything with <code>commit_all</code>, and every
+              entry that did not reach Promote yet just gets skipped, quietly.
+              From the model's side the tool call looked like a success. Nothing
+              landed in the vault though. So it tries again, stages again, lists
+              the staged rows, gets confused, burns turns. I saw this happen so
+              many times. The ladder should have kept junk out of the vault. In
+              practice it mostly kept the agent from getting the job done.
+            </p>
+            <p>Scoring on each pass, roughly:</p>
+            <pre class="code"><code>// every promotion tick
+updated.promotion_score =
+    (updated.promotion_score - config.promotion_decay_per_tick).max(0.0);
+
+if updated.promotion_score &gt;= threshold &amp;&amp; !updated.needs_review {
+    if let Some(next_tier) = updated.tier.next() {
+        updated.tier = next_tier;
+        updated.expires_at = now + config.ttl_for_tier(next_tier);
+    }
+}
+
+// demotion: score fell below 0.5 x the threshold that got us here
+if updated.promotion_score &lt; threshold_to_current * 0.5 {
+    updated.tier = prev_tier;
+}</code></pre>
+            <p>
+              And then the config kept growing. Three TTLs. Two thresholds.
+              Decay per tick, an eval interval, a mention boost, a stage boost.
+              Six knobs, more actually, for a subsystem I was never even looking
+              at. Should have been the smell already, right there.
+            </p>
+            <p>
+              There is one detail that is almost a bit funny. The stage boost is
+              3.5, the threshold from Session to Scratch is 3.0. Which means one
+              single <code>memory:stage</code> already gets you over the first
+              rung on the next pass. Scratch happened more or less by itself. I
+              had built a step that nobody ever really stands on.
+            </p>
+
+            <h2 id="scores">How scores go up, and why it breaks</h2>
+            <p>
+              Decay was the Lethe half. The remembering half was, in the end,
+              two bumps:
+            </p>
+            <ol>
+              <li>
+                Explicit <code>memory:stage</code> adds
+                <code>promotion_stage_boost</code>.
+              </li>
+              <li>
+                After a user turn a mention hook walks over the staged rows.
+                When the user text &ldquo;covers&rdquo; the row's
+                <code>canonical_key</code>, it adds
+                <code>promotion_mention_boost</code>, bumps
+                <code>mention_count</code>, refreshes the TTL.
+              </li>
+            </ol>
+            <p>
+              Now the second one sounds semantic. It really is not. No
+              nomic-embed in there, no cosine, nothing. The code takes the user
+              message, cuts it into words of length three and up, and checks how
+              many overlap with the tokens from the key.
+              <code>hagbard_loves_piano</code> becomes <code>hagbard</code>,
+              <code>loves</code>, <code>piano</code>. Two token hits, or one
+              that is long enough on its own, and the score climbs. The whole
+              thing fits on one screen:
+            </p>
+            <pre
+              class="code"
+            ><code>/// True if user message words match this row strongly enough (deterministic, no embeddings).
+fn user_covers_canonical_key(
+    user_words: &amp;HashSet&lt;String&gt;,
+    canonical_key: &amp;str,
+) -&gt; bool {
+    let tokens: Vec&lt;&amp;str&gt; = canonical_key.split('_').filter(|t| t.len() &gt;= 3).collect();
+    if tokens.is_empty() {
+        return false;
+    }
+    let mut hits = 0usize;
+    let mut longest_hit = 0usize;
+    for t in &amp;tokens {
+        if user_words.contains(*t) {
+            hits += 1;
+            longest_hit = longest_hit.max(t.len());
+        }
+    }
+    if hits &gt;= 2 {
+        return true;
+    }
+    hits &gt;= 1 &amp;&amp; longest_hit &gt;= 5
+}</code></pre>
+            <p>
+              So, as long as you keep repeating the words that happen to live in
+              the title slug, the row goes up. In that one narrow case it works.
+              It breaks the second real language shows up:
+            </p>
+            <ul>
+              <li>
+                <strong>Synonyms.</strong> You staged
+                <code>coffee_preference</code>, and the user says
+                &ldquo;espresso order&rdquo; or &ldquo;my usual drink&rdquo;.
+                Overlap zero. No boost. The thing you are so obviously still
+                talking about decays like you dropped it completely.
+              </li>
+              <li>
+                <strong>Pointing.</strong> Real chat is full of this,
+                &ldquo;keep that&rdquo;, &ldquo;commit it&rdquo;, &ldquo;same as
+                before&rdquo;, &ldquo;write this into the vault&rdquo;. None of
+                these words ever live in a <code>canonical_key</code>, so the
+                hook basically cannot fire. Exactly in the moments where you
+                point at a staged row most clearly, you miss the bump. Brittle
+                is the friendly word for it.
+              </li>
+              <li>
+                <strong>Paraphrase.</strong> Same topic, other words, score
+                stays flat, the pass keeps eating. The tier can demote while the
+                conversation is literally still about that note.
+              </li>
+            </ul>
+            <p>
+              So this &ldquo;forgetting curve&rdquo; did not measure importance
+              at all. It measured string overlap against a slug that I myself
+              invented at stage time. Repeat the slug, score up. Talk like a
+              normal person, with pointers and synonyms, and the bumps never
+              arrive. And here is the annoying part: I already had nomic-embed
+              in the stack, for vault prefetch and for tool routing. I left it
+              out of promotion on purpose, for determinism. That call by itself
+              was fine. What was not fine is that I then used this brittle
+              string thing as if it were a hippocampus.
+            </p>
+            <p>
+              The curation mode was supposed to read these scores later on. I am
+              honestly glad it never shipped on top of them.
+            </p>
+
+            <h2 id="concurrency">The one concurrency exception</h2>
+            <p>
+              I have a hard rule in this codebase. No shared mutable state
+              across threads. Orchestrator and UI talk over
+              <code>mpsc</code>. No <code>Arc&lt;Mutex&lt;T&gt;&gt;</code> just
+              because it happens to be convenient.
+            </p>
+            <p>Except for one single <code>AtomicBool</code>.</p>
+            <p>
+              Snapshot daemon and orchestrator share
+              <code>promotion_suppressed_during_step</code>. While
+              <code>step()</code> is running, the LLM round trip, the tool
+              batch, all the slow parts, the daemon is not allowed to decay or
+              to promote. Otherwise you get these lovely races, &ldquo;the model
+              is about to commit this row&rdquo; versus &ldquo;decay just
+              demoted it&rdquo;. So the orchestrator flips a flag, the daemon
+              reads it and skips its tick.
+            </p>
+            <pre
+              class="code"
+            ><code>/// When true, skip evaluate_promotions_and_decay so decay/tier moves
+/// do not race a slow LLM or tool batch.
+promotion_suppressed_during_step: Arc&lt;AtomicBool&gt;,</code></pre>
+            <p>
+              I made an exception to my own concurrency rule, so that a
+              forgetting curve I do not even look at can interleave
+              &ldquo;safely&rdquo; with the chat. When you arrive at a point
+              like that, the design is usually already wrong somewhere, and
+              throwing more locking at it will not save you.
+            </p>
+
+            <h2 id="actually-for">What it was actually for</h2>
+            <p>Honestly? Two jobs got glued into one.</p>
+            <p>
+              Short term the ladder was a write time gate. Do not let junk flow
+              into the vault by itself, only the &ldquo;important&rdquo; things
+              should turn into Markdown, and important means the score, built up
+              over time.
+            </p>
+            <p>
+              Long term those same scores and tiers were meant as the input for
+              the curation mode from above. Agent walks the memory, reads the
+              ladder state, chooses. I built the sensors first and the walker
+              never came. Either way it sounds scientific. Mostly it is a prior
+              with extra code around it, plus a futures contract I never once
+              cashed in.
+            </p>
+            <p>And without the ladder I already had:</p>
+            <ul>
+              <li>
+                explicit <code>memory:commit</code> and
+                <code>memory:commit_all</code>, the model or me decides
+              </li>
+              <li>
+                a <code>needs_review</code> flag that stops auto promotion,
+                which for now I flip by hand, there is no detector yet
+              </li>
+              <li>
+                turn end mention handling, a key shows up again, interest bumps
+              </li>
+            </ul>
+            <p>
+              That was already enough to stop the vault from becoming a dump.
+              The score ladder was a third mechanism on a door that had two
+              locks on it already. Plus it pretended to know the future.
+            </p>
+            <p>
+              And that is the part that bugs me now. At write time you simply do
+              not know if a thing will matter in three weeks. You guess.
+              Embeddings are far better at a different question: given what the
+              user just said right now, what from the past is relevant? That is
+              a read time question. And that one you can actually compute.
+            </p>
+            <p>So in function I need two states, not three tiers:</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>State</th>
+                    <th>Meaning</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Staged</strong></td>
+                    <td>
+                      working memory, has a TTL, listable, can be committed
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Committed</strong></td>
+                    <td>Markdown in the vault, indexed for semantic recall</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Scratch was not needed. The Promote only gate on
+              <code>commit_all</code> was worse than not needed, because it
+              stalled the agent.
+            </p>
+
+            <h2 id="retrieval">What retrieval was already doing anyway</h2>
+            <p>
+              While the daemon was busy decaying its floats, the turn start
+              prefetch was already ranking the vault memory by similarity and
+              dropping a small block into the system prompt:
+            </p>
+            <pre class="code"><code>[RELEVANT_LEARNED_MEMORY]
+...snippets the embedder thinks match this turn...
+[/RELEVANT_LEARNED_MEMORY]</code></pre>
+            <p>
+              No tiers. No ladder scores. Query now, rank now, stay inside a
+              character budget, done. Junk that never matches any query just
+              sits there and hurts nobody. I should have trusted this a lot
+              earlier.
+            </p>
+            <p>
+              So if I ever pull the trigger, the delete list is fairly obvious.
+              Call it one big TODO:
+            </p>
+            <ul>
+              <li>
+                Scratch tier, <code>next</code>, <code>prev</code>,
+                <code>index</code>, the whole ladder
+              </li>
+              <li>
+                <code>promotion_score</code>, the decay pass, the demotion logic
+              </li>
+              <li>
+                most of the config knobs, keep one
+                <code>staged_ttl_secs</code> and be done
+              </li>
+              <li>
+                the <code>AtomicBool</code>, it only exists because of the
+                ladder anyway
+              </li>
+              <li>
+                the Promote only gate on <code>commit_all</code>, so it would
+                commit all staged rows minus the contradicted ones
+              </li>
+            </ul>
+            <p>
+              What would stay: the tools the model already knows
+              (<code>stage</code>, <code>commit</code>, <code>commit_all</code>,
+              <code>staged_list</code>, <code>query</code>), the
+              <code>needs_review</code> flag, the snapshot daemon but only as
+              persistence, and the mention handling, probably just refreshing
+              the TTL instead of feeding a fake score.
+            </p>
+            <p>
+              A couple hundred lines gone. One concurrency exception gone. Same
+              capabilities. And a lot less to explain to myself the next time I
+              open that file. On paper it is a clean win. Keep that &ldquo;on
+              paper&rdquo; in mind, we come back to it.
+            </p>
+
+            <h2 id="inversion">The deeper inversion, and Markdown stays</h2>
+            <p>
+              Once you stop over curating at write time, another design gets
+              kind of obvious.
+            </p>
+            <p>
+              You can append cheap episodic records, turn digests, tool
+              outcomes, mentions, without first deciding whether they are
+              &ldquo;Promote material&rdquo; or not. At this scale storage is
+              basically free. You filter at retrieval instead, similarity times
+              recency, maybe some BM25 on top. The curated layer stays what it
+              is supposed to be, human readable Markdown in the vault. The index
+              is a derived thing. Delete the index, rebuild it from the vault on
+              boot. That property is not up for discussion, not for me. A binary
+              agent memory file, fine, let it hold the index. It must never
+              become the source of truth.
+            </p>
+            <p>
+              Small note to myself: do not go and tune the ladder instead of
+              deleting it. Making machinery that nobody looks at more precise,
+              that is just polishing the overengineering.
+            </p>
+
+            <h2 id="zettelkasten">
+              Zettelkasten, a graph I prepared and then never really walked
+            </h2>
+            <p>
+              There is a second ghost in this whole design, Niklas Luhmann's
+              Zettelkasten.
+            </p>
+            <p>
+              Short version for the people who do not live in that world.
+              Luhmann, a German sociologist, built this massive slip box of
+              notes. Every note small, atomic, linked by hand to other notes.
+              And the power was never &ldquo;save everything&rdquo;. It was a
+              growing graph of ideas that you could walk through. A new note had
+              to find its neighbours first. The thinking happened inside the
+              links, as much as inside the cards. People in the PKM and Obsidian
+              corner still chase exactly this shape, and for good reasons.
+            </p>
+            <p>
+              I wanted the vault to become that, for the agent. Stable
+              <code>node_id</code>s, revisioned Markdown commits, folders like
+              Topology, Discourse, Synthesis, contradiction as a thing you mark
+              instead of silently overwriting it. The layout is more or less
+              ready to turn into a graph.
+            </p>
+            <p>We are just not there yet.</p>
+            <p>
+              What I actually run day to day is flatter than all this: stage,
+              sometimes commit, semantic search over the chunks, a handful of
+              snippets prefetched into the prompt. The graph dream sat right
+              next to the forgetting curve dream. Both of them were &ldquo;human
+              memory, but engineered&rdquo;. Both made the agent path heavier,
+              before the simple loop was even boringly reliable.
+            </p>
+
+            <h2 id="overambition">
+              Why this is an Eris story, and an overambition story
+            </h2>
+            <p>
+              Eris is my local first Rust agent. Vault as memory, tools behind a
+              gatekeeper, llama.cpp with GBNF so the JSON protocol is already
+              constrained at sample time, a TUI and a web frontend hanging off
+              the same orchestrator.
+            </p>
+            <p>
+              I put a lot of hours into making small local models behave like
+              they had a real protocol. Grammars, recovery budgets, an LLM only
+              view of the transcript for the llama-server templates. And memory
+              was the exact spot where I quietly got soft again. A float, a
+              threshold, a story about importance that sounded like
+              neuroscience, and on top a Zettelkasten shaped vault for a graph I
+              never really walked. The agent did not get smarter from any of it.
+              The code got heavier. The <code>AtomicBool</code> was the receipt
+              for that.
+            </p>
+            <p>
+              If you build agent memory and you catch yourself doing Session,
+              Scratch, long term, with decay &ldquo;like a human
+              hippocampus&rdquo;, stop for a second and ask the boring question.
+              Who reads the scores? If the answer is nobody, then you are not
+              building a forgetting curve. You are building config debt and
+              telling yourself a nice myth about it.
+            </p>
+            <p>
+              Here comes the uncomfortable bit, plainly. I overengineered. I
+              wanted too much at once, Lethe style decay, Promote gates, a
+              future agent that curates by score, Luhmann links, the whole
+              cathedral. And I did not even seriously try the things other
+              people already shipped, or at least sketched out, in this space.
+              Memvid. Mempalace. Karpathy's wiki style memory. Probably three
+              more approaches I bookmarked and then ignored, while I polished my
+              own knobs. For somebody who keeps claiming he cares about
+              deletion, that is a weak look.
+            </p>
+            <p>
+              So the sane next move would be simple. Delete the ladder. Keep
+              staged versus committed. Keep choosing what to remember instead of
+              dumping the whole chat into a file. Keep Markdown as the source of
+              truth. If the agent later walks its own memory it can lean on
+              retrieval, contradictions, plain note text. It does not need my
+              homemade hippocampus floats for that.
+            </p>
+            <p>
+              Would. And here is the honest part I owe you as a solo dev: I am
+              not doing it. Not this week anyway. There is now a fat
+              <code>// TODO: kill the ladder</code> sitting in the repo, and I
+              fully expect to walk past it every day and leave it alone. Eris is
+              a hobby. I build it for the pure joy of building it, and the
+              ladder is somehow my little darling even while I write a whole
+              post about why it is wrong. So it stays, on probation.
+            </p>
+            <p>
+              And honestly the ladder is not even the loudest voice in my head.
+              The real solo dev problem is that I cannot decide where to go
+              next, because everything sounds more fun than removing a
+              <code>f64</code>. Put the chat sessions into SQLite and let the
+              agent query its own history with real SQL. A proper sandbox so it
+              can write and run code without me hovering over the process.
+              Actual builds I can hand to other people, instead of &ldquo;clone
+              the repo and pray&rdquo;. A web based
+              <code>LlmEngine</code> backend, OpenRouter and the like, so Eris
+              is not chained to my local llama.cpp forever. Every single one of
+              these is more exciting than a cleanup, and that is exactly why the
+              ladder is still alive.
+            </p>
+            <p>
+              Forgetting stays good. I still like the Lethe image a lot. I only
+              stop pretending that a <code>f64</code> on a daemon tick ever was
+              that river. The scores can keep ticking in the background for now,
+              I just do not tell myself a neuroscience story about them anymore.
+              TTL expiry, an explicit commit, ranking at read time, that already
+              forgets plenty on its own, without a fake observer watching over
+              it.
+            </p>
+            <p>
+              Two states would be enough. Explicit commit. Rank when you read.
+              Notes in plain text. Ambition very much not on a leash, if we are
+              being honest.
+            </p>
+            <p>
+              One day I will delete the ladder. Nobody would miss the scores,
+              nobody reads them. But not today. Today there is a SQLite branch
+              calling, and that is simply more fun.
+            </p>
+          </div>
+        </div>
+      </article>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <p>&copy; 2026 Jan Dahlke &middot; Apache 2.0</p>
+        <p>
+          This site loads no analytics, no cookies, no third-party trackers.
+          That is intentional and on-brand.
+        </p>
+        <p>
+          Built with static HTML. Deploy target: Cloudflare Pages. Source:
+          <a href="https://github.com/janpauldahlke/eris-site"
+            >github.com/janpauldahlke/eris-site</a
+          >
+        </p>
+      </div>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-rust.min.js"></script>
+    <script>
+      document.querySelectorAll("pre.code code").forEach(function (block) {
+        var text = block.textContent;
+        if (
+          /\b(fn |let |pub |struct |const |impl |use |mod |enum |match |if |else |for |while |return |async |await)\b/.test(
+            text,
+          )
+        ) {
+          block.classList.add("language-rust");
+        } else {
+          block.classList.add("language-markup");
+        }
+      });
+      Prism.highlightAll();
+    </script>
+  </body>
+</html>
