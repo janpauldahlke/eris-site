@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>How tools get picked in Eris: from grep to embeddings to grammar — Eris dev blog</title>
+  <meta name="description"
+    content="How a local 14B model decides which of ~50 tools to call: grepping text output, keyword lists, then embeddings with a policy layer that feeds both the slim prompt and the GBNF grammar." />
+  <meta name="keywords"
+    content="tool routing, embeddings, GBNF, llama.cpp, local LLM, Rust, eris-agent, tool selection" />
+  <link rel="canonical" href="https://eris-system.dev/blog/tool-routing.html" />
+
+  <meta property="og:title" content="How tools get picked in Eris: from grep to embeddings to grammar" />
+  <meta property="og:description"
+    content="From grep to embeddings to grammar: how Eris decides which tools a small local model can call." />
+  <meta property="og:url" content="https://eris-system.dev/blog/tool-routing.html" />
+  <meta property="og:image" content="https://eris-system.dev/assets/og-image.png" />
+  <meta property="og:type" content="article" />
+  <meta property="article:author" content="Jan Paul Dahlke" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="../assets/eris_logo.png" />
+  <link rel="stylesheet" href="../css/theme.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" />
+  <style>
+    pre.code[class*="language-"] {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+
+    pre.code code[class*="language-"] {
+      font-family: var(--font);
+      font-size: inherit;
+    }
+
+    .token.comment,
+    .token.prolog,
+    .token.doctype,
+    .token.cdata {
+      color: var(--muted);
+    }
+
+    .token.keyword {
+      color: #7c3aed;
+    }
+
+    .token.function {
+      color: #0a6b55;
+    }
+
+    .token.string,
+    .token.char {
+      color: #b45309;
+    }
+
+    .token.number {
+      color: #1456a8;
+    }
+
+    .token.operator {
+      color: var(--text);
+    }
+
+    .token.punctuation {
+      color: var(--muted);
+    }
+
+    .token.macro.property {
+      color: #7c3aed;
+    }
+
+    .token.attribute {
+      color: #7c3aed;
+    }
+
+    .token.type-definition,
+    .token.class-name {
+      color: #0e7490;
+    }
+  </style>
+</head>
+
+<body>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="brand" href="../index.html">
+        <img class="brand__mark" src="../assets/eris_logo.svg" width="36" height="36" alt="" />
+        <span class="brand__text">
+          <span class="brand__name">ERIS</span>
+          <span class="brand__tag">local-first vault agent</span>
+        </span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="../index.html#pillars">Overview</a>
+        <a href="../index.html#quickstart">Quickstart</a>
+        <a href="../index.html#scope">Features</a>
+        <a href="../index.html#deeper">Deep dive</a>
+        <a href="../blog/" class="nav--active">Blog</a>
+        <a href="https://github.com/janpauldahlke/eris">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <article class="blog-post">
+      <div class="wrap">
+        <div class="blog-post__header">
+          <a href="../blog/" class="blog-post__back">&larr; all posts</a>
+          <span class="section__label">[dev blog]</span>
+          <h1>How tools get picked in Eris: from grep to embeddings to grammar</h1>
+          <p class="blog-post__subtitle">
+            Or: how a local 14B model decides which of ~50 tools to call, without me writing a giant if-else on the
+            user's message.
+          </p>
+          <p class="blog-post__meta">Jan Paul Dahlke · September 2026</p>
+        </div>
+
+        <nav class="blog-toc" aria-label="Table of contents">
+          <strong>In this post:</strong>
+          <ul class="blog-toc__list">
+            <li><a href="#grep">The grep era</a></li>
+            <li><a href="#routing-phrases">Routing phrases</a></li>
+            <li><a href="#embeddings">Embeddings now</a></li>
+            <li><a href="#policy">The policy layer</a></li>
+            <li><a href="#slim-offer">The slim tool offer</a></li>
+            <li><a href="#no-drift">One list, two consumers</a></li>
+            <li><a href="#grammar">Why the grammar makes this careful</a></li>
+            <li><a href="#advice">What I would tell someone building this</a></li>
+          </ul>
+        </nav>
+
+        <div class="blog-post__body">
+
+          <p>
+            When I started this I knew basically nothing. How you even get an LLM to call a tool, let alone pick the
+            right one, was not obvious to me at all, and every step was me poking at it to see what breaks. So this post
+            is not a &ldquo;here is the clean way&rdquo; post. It is the honest version of that learning curve, all the
+            way from the first clumsy version to what runs now. Tool selection in Eris went through three whole lives to
+            get here: grepping the model's own text output, then keyword lists on the user message, then embeddings with
+            a policy layer sitting on top. Each life existed because the one before it kept failing in a new way, and
+            none of them made the model smarter, they just stopped me handing a small model the wrong tool.
+          </p>
+          <p class="blog-post__callout">
+            Where it landed today: the user text gets embedded, compared against one precomputed vector per tool, and a
+            small policy layer decides whether to offer one tool, a cluster of related ones, or the whole roster. That
+            offered list then feeds two things at once, the slim tool prompt and the GBNF grammar, so prompt and grammar
+            can never disagree about what is callable.
+          </p>
+          <p>
+            But it did not start there. It started with grep.
+          </p>
+
+          <h2 id="grep">The grep era</h2>
+          <p>
+            Before Eris was Eris it was
+            <a href="https://github.com/janpauldahlke/FUCKUP">FUCKUP</a>. Named after Hagbard Celine's supercomputer in
+            the <em>Illuminatus!</em> trilogy, the First Universal Cybernetic-Kinetic Ultramicro-Programmer that answers
+            questions from inside a golden submarine. The name doubling as a status report on the code was a happy
+            accident, or an easterfuck. The FcpError taxonomy from back then still is alive in Eris until today. Ollama
+            plus an Obsidian vault plus Redis plus a bash-ish tool bridge. The relevant line from that README, which I
+            keep around as a monument:
+          </p>
+          <p class="blog-post__callout">
+            The agent has <strong>no native tools</strong>. It outputs <code>API: &lt;command&gt;</code> lines. A loop
+            parses them, calls the bridge, and feeds results back.
+          </p>
+          <p>
+            That is the real grep era, spelled out. The model printed text like <code>API: healthcheck</code>, a shell
+            loop grepped the output for <code>API:</code> lines, matched the command against an allowlist, ran it
+            through a bridge on the host, and pasted the result back into the next turn. Tool &ldquo;selection&rdquo;
+            was string parsing on both ends: regex on the model output to find the call, keyword lists to decide what
+            was even relevant to offer. It worked well enough to be dangerous. Means, it worked in the demo. In real use
+            it did not, and you find that out live.
+          </p>
+          <p>
+            Later it grew a second path: a patched fork of an existing orchestrator doing structured tool calling in
+            OpenAI function-call format, because text <code>API:</code> parsing was too brittle. And that is where the
+            lesson landed that made me throw the whole thing away and rewrite in Rust. Local models through Ollama were
+            awful at structured tool calls. Streaming broke <code>tool_calls</code> and handed back raw text, custom
+            tools did not get passed through, the system prompt sometimes never reached the model. You can patch a
+            TypeScript orchestrator around all of that, and I did. But the deeper problem stayed.
+          </p>
+          <p>
+            My first fix was the obvious one. If the model does not get the tool contract, then push the whole tool
+            contract into the system prompt, hard. And it kind of worked. But the system prompt got bloated fast. Every
+            tool with its full schema, all the time, every turn. On sparse VRAM that is exactly the wrong place to spend
+            your tokens. The context is your budget, and I was burning it on tool definitions the model did not even
+            need this turn.
+          </p>
+          <p>
+            So the real fix was somewhere else. Move to llama.cpp, stop describing the tools in prose, and constrain the
+            sampler directly instead. Hand it only the tools that matter for this turn. JIT the structured part instead
+            of front-loading all of it. Reliability has to come from <em>constraining the sampler</em>, not from
+            politely asking a streaming API to behave. That is the moment Eris starts.
+          </p>
+          <p>
+            But back to selection. Even the keyword-matching half of the old approach, the &ldquo;which tools are
+            relevant&rdquo; part, took the user line, lowercased it, and ran a pile of <code>contains</code> checks.
+            &ldquo;weather&rdquo; in the string, offer the weather tool. &ldquo;remind&rdquo; in the string, offer the
+            reminder. It is the honest first thing everybody builds.
+          </p>
+          <p>
+            Then real usage happens and it falls apart in the boring ways:
+          </p>
+          <ul>
+            <li><strong>Synonyms.</strong> User says &ldquo;how warm is it outside&rdquo;. No &ldquo;weather&rdquo;
+              token anywhere. Miss.</li>
+            <li><strong>Other language.</strong> I chat with Eris half in German. &ldquo;wie spät ist es&rdquo; does not
+              contain &ldquo;time&rdquo;.</li>
+            <li><strong>Pointing.</strong> &ldquo;do that again&rdquo;, &ldquo;same as before&rdquo;, &ldquo;open
+              it&rdquo;. None of these words live in any keyword list.</li>
+            <li><strong>Collisions.</strong> &ldquo;open&rdquo; matched &ldquo;open the file&rdquo; and &ldquo;you will
+              open the way for future AIs&rdquo; with equal confidence. The second one is not a tool call, it is me
+              being poetic at my own agent at 2am.</li>
+          </ul>
+          <p>
+            You can patch each of these with more keywords, and then you have a 400 line lexical matcher that nobody
+            dares touch and that still misses the next phrasing. I know because I wrote it and lived with it.
+          </p>
+          <p>
+            Two things survived that era on purpose, and I want to be honest that they survived, because a lot of
+            routing writeups pretend they went fully semantic and they did not.
+          </p>
+          <p>
+            The first survivor is a set of <strong>lexical guards</strong> for cases where a keyword is actually a hard
+            signal. If the text has a real URL or a domain-looking token, I do not want to <em>hope</em> the embedder
+            feels like offering <code>web:fetch</code>. I force it:
+          </p>
+          <pre class="code"><code>if Self::has_web_lexical_intent(thought) &amp;&amp; !hits.iter().any(|(t, _)| t == "web:fetch") {
+    tracing::info!(
+        event = "LEXICAL_TOOL_GUARD",
+        forced_tool = "web:fetch",
+        thought_preview = %thought.chars().take(120).collect::&lt;String&gt;(),
+        "Forcing web:fetch due to lexical URL/page intent"
+    );
+    hits.push(("web:fetch".to_string(), 1.0));
+}</code></pre>
+          <p>
+            Note the score <code>1.0</code>. That is not a real cosine, it is a &ldquo;do not argue with me&rdquo;
+            marker, and later the policy layer treats anything at ~0.99 and above as a forced hit that never gets
+            demoted. The lexical checks themselves learned some manners over time. Bare <code>open</code> used to match
+            figurative English, so now it is phrases like <code>open page</code>, <code>open the website</code>,
+            <code>visit the page</code>, not the lone verb.
+          </p>
+          <p>
+            The second survivor is the keyword lists themselves. They did not get deleted. They got repurposed.
+          </p>
+
+          <h2 id="routing-phrases">Routing phrases: keywords that grew up</h2>
+          <p>
+            The old keyword lists became <strong>routing phrases</strong>. Same strings, roughly, but now they do a
+            different job. Instead of being matched with <code>contains</code>, they are the <em>text you embed to
+              describe a tool</em>.
+          </p>
+          <p>
+            Every tool has a line of &ldquo;this is what people say when they want me&rdquo;. For tools without a richer
+            descriptor there is a compile-time fallback in <code>routing_phrases.rs</code>:
+          </p>
+          <pre class="code"><code>"clock:now" =&gt; "what time is it, current time, timezone, date now, local time",
+"weather:current" =&gt; {
+    "weather now, temperature outside, is it raining, rainfall, sunny or cloudy, conditions today, current conditions, what's the weather like"
+}</code></pre>
+          <p>
+            And for the tools I cared about more, the phrases live in the TOML descriptor next to
+            <code>when_to_use</code> / <code>when_not_to_use</code>, as <code>routing_hints</code>:
+          </p>
+          <pre class="code"><code>tool_name = "agenda:remind_at"
+routing_hints = [
+    "remind me at",
+    "remind me in",
+    "remind me about",
+    # ...
+]</code></pre>
+          <p>
+            Descriptor hints win when present, otherwise the fallback string, otherwise just the tool description. That
+            resolution order lives in one place so nothing drifts:
+          </p>
+          <pre class="code"><code>fn enrich_for_routing(
+    name: &amp;str,
+    description: &amp;str,
+    descriptors: Option&lt;&amp;ToolDescriptorRegistry&gt;,
+) -&gt; String {
+    if let Some(registry) = descriptors
+        &amp;&amp; let Some(desc) = registry.get(name)
+        &amp;&amp; !desc.routing_hints.is_empty()
+    {
+        return format!(
+            "{}: {}. Common triggers: {}",
+            name, description, desc.routing_hints.join(", ")
+        );
+    }
+    let hints = crate::tools::routing_phrases::fallback_triggers(name);
+    if hints.is_empty() {
+        format!("{}: {}", name, description)
+    } else {
+        format!("{}: {}. Common triggers: {}", name, description, hints)
+    }
+}</code></pre>
+          <p>
+            So the exact same phrases that used to be a brittle <code>contains</code> list are now the seed text for a
+            vector. Synonyms and paraphrase stop being my problem and become the embedder's problem, which is the whole
+            point, because that is a thing embedders are actually good at.
+          </p>
+
+          <h2 id="embeddings">Embeddings now</h2>
+          <p>
+            At startup the <code>ToolRouter</code> embeds each tool's enriched text once and keeps the vectors in
+            memory:
+          </p>
+          <pre class="code"><code>pub async fn new(
+    embed: Arc&lt;dyn EmbeddingProvider&gt;,
+    tool_descriptions: Vec&lt;(String, String)&gt;,
+    descriptors: Option&lt;Arc&lt;ToolDescriptorRegistry&gt;&gt;,
+    threshold: f32,
+) -&gt; Result&lt;Self&gt; {
+    let mut tool_embeddings = Vec::with_capacity(tool_descriptions.len());
+    for (name, description) in &amp;tool_descriptions {
+        let text = Self::enrich_for_routing(name, description, descriptors.as_deref());
+        let embedding = embed.embed(&amp;text).await?;
+        tool_embeddings.push((name.clone(), embedding));
+    }
+    Ok(Self { embed, tool_embeddings, threshold })
+}</code></pre>
+          <p>
+            Same embedding model as the vector memory (<code>nomic-embed-text</code> by default), so I am not shipping a
+            second model just for routing. One embed model does prefetch, memory recall, and tool routing.
+          </p>
+          <p>
+            Per turn, embed the user text, cosine against every tool vector, keep whatever clears the threshold
+            (<code>tool_match_threshold</code>, default <code>0.50</code>), sort descending:
+          </p>
+          <pre class="code"><code>let thought_vec = self.embed_text(thought).await?;
+let mut hits: Vec&lt;(String, f32)&gt; = self
+    .tool_embeddings
+    .iter()
+    .filter_map(|(name, emb)| {
+        let sim = cosine_similarity(&amp;thought_vec, emb);
+        if sim &gt;= self.threshold { Some((name.clone(), sim)) } else { None }
+    })
+    .collect();
+hits.sort_by(|a, b| b.1.partial_cmp(&amp;a.1).unwrap_or(std::cmp::Ordering::Equal));</code></pre>
+          <p>
+            Before any of this even runs there is a cheap short-input guard: greetings and tiny utterances
+            (&ldquo;hey&rdquo;, &ldquo;thanks&rdquo;, &ldquo;test&rdquo;) are treated as conversation and skip embedding
+            entirely, unless they carry an obvious tool token like a URL or &ldquo;list my documents&rdquo;. No point
+            paying for an embed call and a grammar recompile to answer &ldquo;hi&rdquo;.
+          </p>
+          <p>
+            There is also one embarrassingly specific semantic floor worth mentioning, because it is the kind of thing
+            you only learn from running the thing daily. Moltbook tools (my little federated social thing) kept getting
+            weakly matched by general chat and especially by memory-recall phrasing, they all sit around 0.50 to 0.56
+            against each other. So unless the user actually said &ldquo;moltbook&rdquo; or &ldquo;submolt&rdquo;,
+            moltbook hits below 0.58 get dropped. Not elegant. Correct.
+          </p>
+
+          <h2 id="policy">More than top-k: the policy layer</h2>
+          <p>
+            Here is the part I am actually a bit proud of, and the part most &ldquo;just embed it&rdquo; writeups skip.
+          </p>
+          <p>
+            Naive routing is: take top-k by cosine, offer those, done. That is fine until you remember what happens
+            downstream. Downstream, on the llama.cpp backend, the offered tools get compiled into a GBNF grammar that
+            <em>forces</em> the model's output. If the router confidently picks one wrong tool and hands the grammar
+            exactly that one tool, the model is now structurally locked into calling the wrong thing. Top-1 with a hard
+            grammar behind it is not &ldquo;confident&rdquo;, it is &ldquo;unrecoverable&rdquo;.
+          </p>
+          <p>
+            So there is a policy layer between the raw cosine hits and the offer. It does not replace embeddings, it
+            just vetoes, widens, or pairs. The entry point reads like a little rulebook:
+          </p>
+          <pre class="code"><code>pub fn decide(
+    signals: &amp;RoutingSignals,
+    registered: &amp;[String],
+    knobs: RoutingPolicyKnobs,
+) -&gt; RoutingDecision {
+    // Rule 1 — dialog pairing (agenda → mail → calendar → gated doc).
+    if let Some(decision) = try_dialog_pairing(signals, registered) {
+        return decision;
+    }
+    let (forced, embed): (Vec&lt;_&gt;, Vec&lt;_&gt;) = signals
+        .embed_hits
+        .iter().cloned()
+        .partition(|(_, score)| *score &gt;= FORCED_HIT_FLOOR);
+
+    // Rule 2 — lone weak embed hit demotion (+ unsure fallback).
+    // Rule 3 — near-tie across related domains → affinity cluster union.
+    // ...
+}</code></pre>
+          <p>
+            Three moves matter here.
+          </p>
+          <p>
+            <strong>Demote the lone weak hit.</strong> If the only thing that cleared the threshold is a single tool
+            sitting below <code>tool_single_hit_floor</code> (0.58), that is not confidence, that is a coin flip.
+            Offering it alone would GBNF-lock the model onto a guess. So a lone weak hit gets demoted and we fall
+            through to the full roster (or, configurable, to that tool's domain cluster):
+          </p>
+          <pre class="code"><code>fn demote_lone_weak_embed(
+    embed: Vec&lt;(String, f32)&gt;,
+    single_hit_floor: f32,
+) -&gt; (Vec&lt;(String, f32)&gt;, Option&lt;(String, f32)&gt;) {
+    if embed.len() == 1 &amp;&amp; embed[0].1 &lt; single_hit_floor {
+        tracing::info!(
+            tool = %embed[0].0, score = embed[0].1, floor = single_hit_floor,
+            event = "routing.policy.single_hit_demoted",
+            "Lone weak semantic hit demoted (avoid GBNF lock-in)"
+        );
+        return (Vec::new(), Some((embed[0].0.clone(), embed[0].1)));
+    }
+    (embed, None)
+}</code></pre>
+          <p>
+            <strong>Widen a near-tie into a cluster, but only for related domains.</strong> When the top hits are within
+            <code>match_margin</code> (0.05) of each other, that is the model being torn between neighbours.
+            &ldquo;remind me tomorrow at 10&rdquo; scores <code>clock:alarm</code> and <code>agenda:remind_at</code>
+            almost identically, because honestly they <em>are</em> almost the same intent. In that case I do not want to
+            pick one and lock the grammar to it. I widen to the union of the related domain clusters and let the model
+            choose inside the grammar:
+          </p>
+          <pre class="code"><code>// clock + agenda + calendar share the "time" affinity bucket.
+pub fn affinity_group(domain: &amp;str) -&gt; Option&lt;&amp;'static str&gt; {
+    match domain {
+        "agenda" | "clock" | "calendar" =&gt; Some("time"),
+        "web" | "news" | "wiki" =&gt; Some("web"),
+        "doc" | "vault" | "memory" | "media" =&gt; Some("knowledge"),
+        // ...
+        _ =&gt; None,
+    }
+}</code></pre>
+          <p>
+            The &ldquo;only related domains&rdquo; bit matters. A near-tie across <code>moltbook</code> +
+            <code>web</code> + <code>db</code> + <code>doc</code> is not a coherent cluster, that is just mush where
+            everything landed around 0.55. Dumping all four families' tools into the grammar would be worse than
+            useless. So unrelated near-ties stay a plain cosine-ranked subset, no cluster dump. This one rule killed a
+            whole class of &ldquo;why did it offer the train schedule tool for a memory question&rdquo; bugs.
+          </p>
+          <p>
+            <strong>Keep the ordering honest.</strong> Whatever comes out, forced or cluster-widened or plain, gets
+            re-ranked by the original cosine at the end, so the tool the embedder actually liked stays near the top of
+            the phrase map the model reads. Cluster siblings that never got a real score inherit the best score from
+            their domain, minus a hair, so they sort right after the seed instead of jumping the queue.
+          </p>
+          <p>
+            There is also a small dialog memory: the last handful of successful tools is kept (capped, session-scoped)
+            so &ldquo;delete that email&rdquo; after a <code>mail:check</code> can pair to <code>mail:delete</code>
+            instead of being read as a bare &ldquo;delete&rdquo; with no object. Agenda wins over mail and calendar in
+            those pairings, because that is the order that matched how I actually talk to it.
+          </p>
+
+          <h2 id="slim-offer">The slim tool offer</h2>
+          <p>
+            Okay, so the policy layer produced an offered list. Now, what does the model actually see?
+          </p>
+          <p>
+            The naive answer is: all the tools, full JSON Schema for every one, dumped into the system prompt. For ~50
+            tools that is a wall of schema that eats context and, worse, gives a small model 50 ways to be wrong. The
+            <a href="gbnf-grammars.html">GBNF post</a> already argued that fewer choices means fewer mistakes, and this
+            is the prompt-side half of that.
+          </p>
+          <p>
+            So by default (<code>slim_tool_prompt = true</code>) the tool-mode prompt is not the schema wall. It is two
+            smaller things:
+          </p>
+          <ol>
+            <li>A <strong>phrase map</strong>, a little markdown table of tool name, short description, and the same
+              routing phrases from earlier, so the model has natural-language hooks for each offered tool.</li>
+            <li>The tool definitions <strong>with</strong> <code>parameters</code> <strong>stripped</strong>. The model
+              sees that <code>vault:write</code> exists and roughly what it is for, but not the full argument schema.
+              The full schema is not needed to <em>decide</em> to call a tool, and if the model later gets the args
+              shape wrong, gatekeeper schema recovery supplies the real schema on demand.</li>
+          </ol>
+          <p>
+            The phrase map is generated at runtime from the registered tools plus their descriptors:
+          </p>
+          <pre class="code"><code>"| Tool | Description (short) | Typical phrasing / triggers |".to_string(),
+"| ---- | ------------------- | --------------------------- |".to_string(),
+// one row per offered tool, phrases = descriptor hints, else fallback, else description</code></pre>
+          <p>
+            Before that list is finalized there are a few <strong>offer overlays</strong>, the pragmatic pairings that
+            experience forced on me:
+          </p>
+          <pre class="code"><code>// web:fetch or web:search in the offer? then web:find has to come too,
+// because you always want to query what you just fetched.
+let needs_web_find = offered.iter().any(|n| n == "web:fetch" || n == "web:search");
+// doc:read in the offer usually means the model will want to write a summary,
+// so pair vault:write if the state allows it.
+if offered.iter().any(|n| n == "doc:read")
+    &amp;&amp; !offered.iter().any(|n| n == "vault:write")
+    &amp;&amp; Gatekeeper::state_allows_tool(state, "vault:write")
+{
+    offered.push("vault:write".to_string());
+}</code></pre>
+          <p>
+            There is also a cap (<code>tool_map_offer_cap</code>) if you want to hard-limit how many router hits make it
+            into the map, and a &ldquo;moltbook latch&rdquo; so that once a turn is clearly about moltbook, the whole
+            moltbook family comes along instead of one lonely endpoint.
+          </p>
+
+          <h2 id="no-drift">One list, two consumers, no drift</h2>
+          <p>
+            Here is the bit that ties the whole thing together and is the reason I bothered writing
+            <code>overlays.rs</code> as its own module instead of inlining it twice.
+          </p>
+          <p>
+            The offered-tool list feeds <strong>two</strong> consumers on every tool turn: the slim prompt assembly, and
+            the GBNF grammar. If those two ever disagree, you get the worst kind of bug, the prompt tells the model tool
+            X is available, the grammar forbids tool X's tokens, and the model wedges. So both call the exact same
+            function:
+          </p>
+          <pre class="code"><code>pub(crate) fn slim_offered_tool_names(
+    pre_llm_matched_tools: &amp;[String],
+    tool_map_offer_cap: usize,
+    moltbook_overlay_latched: bool,
+    gatekeeper: &amp;Gatekeeper,
+    state: &amp;AgentState,
+) -&gt; Vec&lt;String&gt; {
+    crate::orchestrator::routing::apply_offer_overlays(
+        pre_llm_matched_tools, tool_map_offer_cap,
+        moltbook_overlay_latched, gatekeeper, state,
+    )
+}</code></pre>
+          <p>
+            Single source of truth. The prompt and the grammar are computed from the same <code>offered</code>, in the
+            same order, with the same overlays. They physically cannot drift, because there is only one list.
+          </p>
+
+          <h2 id="grammar">Why the grammar is the whole reason this is careful</h2>
+          <p>
+            If you only remember one thing: the reason routing is this defensive is that on llama.cpp the offer is not a
+            suggestion, it is a hard constraint at sample time.
+          </p>
+          <p>
+            The offered list gets compiled into a GBNF grammar. GBNF constrains which tokens the sampler is even allowed
+            to emit, before sampling, so anything that cannot extend into a valid parse gets masked out. The model does
+            not &ldquo;try to&rdquo; produce a tool call in the right shape, it <em>cannot</em> produce anything else.
+            Full detail is in the <a href="gbnf-grammars.html">GBNF post</a>, but the shape is: a fixed protocol envelope
+            (thought, status, message, tool_calls), and a <code>tool-call</code> rule whose allowed names are exactly
+            this turn's offered tools, with each tool's args compiled from its JSON Schema.
+          </p>
+          <p>
+            Which is exactly why I do not let the router hand over a single confident guess. Under a hard grammar:
+          </p>
+          <ul>
+            <li>Offer one wrong tool, the model is <em>forced</em> to call the wrong tool. No recovery inside the turn.
+            </li>
+            <li>Offer an empty tool list when the router says &ldquo;this is just chat&rdquo;, and
+              <code>tool_calls</code> can only be <code>[]</code>. The model cannot hallucinate a call. That is a
+              feature, that is the conversational path.</li>
+            <li>Offer a cluster on a near-tie, and the model gets to pick the right neighbour, but only from a small,
+              related, structurally valid set.</li>
+          </ul>
+          <p>
+            So the grammar is what turns &ldquo;structured output&rdquo; from a prompt-time please into a real
+            guarantee. The policy layer only makes sure that guarantee points at roughly the right tools. In the end
+            there are four layers stacked on each other. Embeddings find the candidates. The policy decides how wide to
+            open the door. The slim map tells the model what is behind it. The grammar makes sure whatever comes back
+            actually parses. None of these layers I planned upfront. Each one is there because the one before it burned
+            me first.
+          </p>
+
+          <h2 id="advice">What I would tell someone building this</h2>
+          <p>
+            If you route tools for a local model with grammar-constrained output: the thing I got wrong the longest was
+            to treat routing as a ranking problem. It is not really about ranking. The real question is how much you
+            trust that ranking before you let a grammar act on it.
+          </p>
+          <ul>
+            <li>Embeddings beat keyword matching for finding candidates. Keep your old keyword lists though, they are
+              perfectly good embedding seeds and decent hard-override floors.</li>
+            <li>Top-1 plus a hard grammar is a trap. Confidence has to be earned with a score floor and a margin check,
+              and when it is not there, widen instead of guessing.</li>
+            <li>Widen along real relationships (time-ish tools together, knowledge tools together), not along whatever
+              happened to score near 0.55.</li>
+            <li>Compute the offer once and feed both the prompt and the grammar from it. Two derivations of &ldquo;what
+              is callable&rdquo; will drift, and the failure mode is nasty.</li>
+          </ul>
+          <p>
+            None of this made the model smarter. It just stopped me from handing a small model a loaded grammar pointed
+            at the wrong tool. Which, on an 14B, is most of the battle.
+          </p>
+          <p>
+            Code is at <a href="https://github.com/janpauldahlke/eris">github.com/janpauldahlke/eris</a>, Apache 2.0.
+          </p>
+          <p>
+            Routing lives under <code>src/orchestrator/routing/</code>, the router itself in
+            <code>src/orchestrator/tool_router.rs</code>. Poke at it, break it, tell me where it is dumb ;-) !!
+          </p>
+
+          <p class="blog-post__signoff">
+            <em>Jan</em>
+          </p>
+        </div>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>&copy; 2026 Jan Dahlke &middot; Apache 2.0</p>
+      <p>
+        This site loads no analytics, no cookies, no third-party trackers.
+        That is intentional and on-brand.
+      </p>
+      <p>
+        Built with static HTML. Deploy target: Cloudflare Pages.
+        Source:
+        <a href="https://github.com/janpauldahlke/eris-site">github.com/janpauldahlke/eris-site</a>
+      </p>
+    </div>
+  </footer>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-rust.min.js"></script>
+  <script>
+    document.querySelectorAll('pre.code code').forEach(function (block) {
+      var text = block.textContent;
+      if (/\b(fn |let |pub |struct |const |impl |use |mod |enum |match |if |else |for |while |return |async |await)\b/.test(text)) {
+        block.classList.add('language-rust');
+      } else {
+        block.classList.add('language-markup');
+      }
+    });
+    Prism.highlightAll();
+  </script>
+</body>
+
+</html>
